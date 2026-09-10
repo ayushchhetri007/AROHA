@@ -1,16 +1,16 @@
 ﻿import { Request, Response } from 'express';
 import db from '../config/db.js';
 
-export const getDistrictAnalytics = (req: Request, res: Response) => {
+export const getDistrictAnalytics = async (req: Request, res: Response) => {
   const district = (req.query.district as string) || 'Satara';
 
-  const totalFacilities = db.prepare('SELECT COUNT(*) as count FROM facilities WHERE district = ?').get(district) as any;
-  const totalPatients = db.prepare('SELECT COUNT(*) as count FROM patients WHERE district = ?').get(district) as any;
-  const totalAppointments = db.prepare('SELECT COUNT(*) as count FROM appointments').get() as any;
-  const completedReferrals = db.prepare("SELECT COUNT(*) as count FROM referrals WHERE status IN ('completed', 'attended', 'accepted')").get() as any;
-  const totalReferrals = db.prepare('SELECT COUNT(*) as count FROM referrals').get() as any;
+  const totalFacilities = await db.prepare('SELECT COUNT(*) as count FROM facilities WHERE district = ?').get(district) as any;
+  const totalPatients = await db.prepare('SELECT COUNT(*) as count FROM patients WHERE district = ?').get(district) as any;
+  const totalAppointments = await db.prepare('SELECT COUNT(*) as count FROM appointments').get() as any;
+  const completedReferrals = await db.prepare("SELECT COUNT(*) as count FROM referrals WHERE status IN ('completed', 'attended', 'accepted')").get() as any;
+  const totalReferrals = await db.prepare('SELECT COUNT(*) as count FROM referrals').get() as any;
 
-  const totalMeds = db.prepare(`
+  const totalMeds = await db.prepare(`
     SELECT COUNT(*) as total,
            SUM(CASE WHEN status = 'out_of_stock' THEN 1 ELSE 0 END) as stockouts,
            SUM(CASE WHEN status = 'in_stock' THEN 1 ELSE 0 END) as instock

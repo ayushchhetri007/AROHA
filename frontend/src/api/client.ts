@@ -45,10 +45,10 @@ class ApiClient {
     return this.request<any>('/profile');
   }
 
-  login(identifier: string, role?: string) {
+  login(identifier: string, role?: string, password?: string) {
     return this.request<any>('/auth/login', {
       method: 'POST',
-      body: JSON.stringify({ identifier, role })
+      body: JSON.stringify({ identifier, role, password })
     });
   }
 

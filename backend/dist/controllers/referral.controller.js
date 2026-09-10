@@ -5,17 +5,17 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.updateReferralStatus = exports.getReferralById = exports.getAllReferrals = void 0;
 const db_js_1 = __importDefault(require("../config/db.js"));
-const getAllReferrals = (req, res) => {
+const getAllReferrals = async (req, res) => {
     const { status, facility_id } = req.query;
     let patient_id = req.query.patient_id;
     // Security: If the request is from a patient role, strictly restrict to their own patient profile
     if (req.user?.role === 'patient') {
-        const ownPatient = db_js_1.default.prepare('SELECT id FROM patients WHERE user_id = ? OR phone = ? OR id = ?').get(req.user.id, req.user.phone, req.user.id);
+        const ownPatient = await db_js_1.default.prepare('SELECT id FROM patients WHERE user_id = ? OR phone = ? OR id = ?').get(req.user.id, req.user.phone, req.user.id);
         if (ownPatient) {
             patient_id = ownPatient.id;
         }
         else if (patient_id) {
-            const p = db_js_1.default.prepare('SELECT id, user_id, phone FROM patients WHERE id = ?').get(patient_id);
+            const p = await db_js_1.default.prepare('SELECT id, user_id, phone FROM patients WHERE id = ?').get(patient_id);
             if (p && (p.user_id === req.user.id || p.phone === req.user.phone)) {
                 patient_id = p.id;
             }
@@ -54,13 +54,13 @@ const getAllReferrals = (req, res) => {
         params.push(patient_id);
     }
     query += ' ORDER BY r.created_at DESC';
-    const referrals = db_js_1.default.prepare(query).all(...params);
+    const referrals = await db_js_1.default.prepare(query).all(...params);
     res.json(referrals);
 };
 exports.getAllReferrals = getAllReferrals;
-const getReferralById = (req, res) => {
+const getReferralById = async (req, res) => {
     const { id } = req.params;
-    const referral = db_js_1.default.prepare(`
+    const referral = await db_js_1.default.prepare(`
     SELECT r.*,
            p.full_name as patient_name, p.age, p.gender, p.village, p.phone as patient_phone, p.abha_id,
            rf.name as referring_facility_name, rf.address as referring_address,
@@ -75,24 +75,24 @@ const getReferralById = (req, res) => {
   `).get(id);
     if (!referral)
         return res.status(404).json({ error: 'Referral not found' });
-    const events = db_js_1.default.prepare('SELECT * FROM referral_events WHERE referral_id = ? ORDER BY timestamp ASC').all(id);
+    const events = await db_js_1.default.prepare('SELECT * FROM referral_events WHERE referral_id = ? ORDER BY timestamp ASC').all(id);
     res.json({
         referral,
         events
     });
 };
 exports.getReferralById = getReferralById;
-const updateReferralStatus = (req, res) => {
+const updateReferralStatus = async (req, res) => {
     const { id } = req.params;
     const { status, outcome_notes, actor_role } = req.body;
-    db_js_1.default.transaction(() => {
-        db_js_1.default.prepare(`
+    await db_js_1.default.transaction(async (trx) => {
+        await trx.prepare(`
       UPDATE referrals
       SET status = ?, outcome_notes = COALESCE(?, outcome_notes),
           completed_at = CASE WHEN ? = 'completed' THEN CURRENT_TIMESTAMP ELSE completed_at END
       WHERE id = ?
     `).run(status, outcome_notes || null, status, id);
-        db_js_1.default.prepare(`
+        await trx.prepare(`
       INSERT INTO referral_events (id, referral_id, event_type, description, actor_role)
       VALUES (?, ?, ?, ?, ?)
     `).run(`re-${Date.now()}`, id, `Status updated to ${status.toUpperCase()}`, outcome_notes || `Referral status progressed to ${status}`, actor_role || 'facility_staff');

@@ -264,9 +264,9 @@ export const DemoProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const login = async (role: string, identifier: string, _passwordOrOtp?: string): Promise<boolean> => {
+  const login = async (role: string, identifier: string, passwordOrOtp?: string): Promise<boolean> => {
     try {
-      const res = await api.login(identifier, role);
+      const res = await api.login(identifier, role, passwordOrOtp);
       setCurrentUser(res.user);
       localStorage.setItem('seva_current_user', JSON.stringify(res.user));
 
@@ -290,11 +290,12 @@ export const DemoProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setViewHistory([]);
 
       // Direct redirection to role dashboard
-      if (role === 'patient') setCurrentView('citizen');
-      else if (role === 'asha_worker') setCurrentView('frontline');
-      else if (role === 'doctor') setCurrentView('doctor');
-      else if (role === 'hospital') setCurrentView('hospital');
-      else if (role === 'admin') setCurrentView('admin');
+      const targetRole = res.user?.role || role;
+      if (targetRole === 'patient') setCurrentView('citizen');
+      else if (targetRole === 'asha_worker') setCurrentView('frontline');
+      else if (targetRole === 'doctor') setCurrentView('doctor');
+      else if (targetRole === 'hospital') setCurrentView('hospital');
+      else if (targetRole === 'admin') setCurrentView('admin');
       return true;
     } catch (err: any) {
       showToast('Authentication failed: ' + err.message, 'error');

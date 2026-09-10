@@ -6,7 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.authMiddleware = authMiddleware;
 exports.requireRole = requireRole;
 const db_js_1 = __importDefault(require("../config/db.js"));
-function authMiddleware(req, res, next) {
+async function authMiddleware(req, res, next) {
     // Allow demo authorization header or session simulation
     const authHeader = req.headers.authorization;
     const roleHeader = req.headers['x-demo-role'];
@@ -15,10 +15,10 @@ function authMiddleware(req, res, next) {
         const token = authHeader.replace('Bearer ', '').trim();
         if (token.startsWith('demo-token-')) {
             const uId = token.replace('demo-token-', '');
-            let user = db_js_1.default.prepare('SELECT * FROM users WHERE id = ?').get(uId);
+            let user = await db_js_1.default.prepare('SELECT * FROM users WHERE id = ?').get(uId);
             if (!user) {
                 const patId = uId.replace(/^usr-/, '');
-                const patient = db_js_1.default.prepare('SELECT * FROM patients WHERE UPPER(id) = UPPER(?) OR UPPER(id) = UPPER(?) OR phone = ?').get(patId, uId, patId);
+                const patient = await db_js_1.default.prepare('SELECT * FROM patients WHERE UPPER(id) = UPPER(?) OR UPPER(id) = UPPER(?) OR phone = ?').get(patId, uId, patId);
                 if (patient) {
                     user = {
                         id: uId,
@@ -37,10 +37,10 @@ function authMiddleware(req, res, next) {
         }
     }
     if (userIdHeader) {
-        let user = db_js_1.default.prepare('SELECT * FROM users WHERE id = ?').get(userIdHeader);
+        let user = await db_js_1.default.prepare('SELECT * FROM users WHERE id = ?').get(userIdHeader);
         if (!user) {
             const patId = userIdHeader.replace(/^usr-/, '');
-            const patient = db_js_1.default.prepare('SELECT * FROM patients WHERE UPPER(id) = UPPER(?) OR UPPER(id) = UPPER(?) OR phone = ?').get(patId, userIdHeader, patId);
+            const patient = await db_js_1.default.prepare('SELECT * FROM patients WHERE UPPER(id) = UPPER(?) OR UPPER(id) = UPPER(?) OR phone = ?').get(patId, userIdHeader, patId);
             if (patient) {
                 user = {
                     id: userIdHeader,
@@ -59,7 +59,7 @@ function authMiddleware(req, res, next) {
     }
     if (roleHeader) {
         const mappedRole = roleHeader === 'hospital' ? 'facility_staff' : roleHeader;
-        const user = db_js_1.default.prepare('SELECT * FROM users WHERE role = ? OR role = ? LIMIT 1').get(roleHeader, mappedRole);
+        const user = await db_js_1.default.prepare('SELECT * FROM users WHERE role = ? OR role = ? LIMIT 1').get(roleHeader, mappedRole);
         if (user) {
             req.user = roleHeader === 'hospital' ? { ...user, role: 'hospital' } : user;
             return next();
@@ -67,7 +67,7 @@ function authMiddleware(req, res, next) {
     }
     // Fallback to default demo user (Meera Patil) ONLY if no specific authorization header was provided
     if (!authHeader && !userIdHeader) {
-        const defaultUser = db_js_1.default.prepare('SELECT * FROM users WHERE id = ?').get('usr-patient-1');
+        const defaultUser = await db_js_1.default.prepare('SELECT * FROM users WHERE id = ?').get('usr-patient-1');
         req.user = defaultUser;
         return next();
     }

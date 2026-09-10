@@ -2,17 +2,17 @@ import { Request, Response } from 'express';
 import db from '../config/db.js';
 import { AuthRequest } from '../middleware/auth.js';
 
-export const getCommunitySummary = (req: AuthRequest, res: Response) => {
+export const getCommunitySummary = async (req: AuthRequest, res: Response) => {
   const ashaId = req.query.asha_id as string || 'usr-asha-1';
 
   // Counts
-  const totalBeneficiaries = db.prepare('SELECT COUNT(*) as count FROM patients WHERE village IN (?, ?)').get('Shirwal', 'Khed') as any;
-  const pregnantWomen = db.prepare('SELECT COUNT(*) as count FROM maternal_records').get() as any;
-  const highRiskPregnant = db.prepare('SELECT COUNT(*) as count FROM maternal_records WHERE high_risk_flag = 1').get() as any;
-  const infants = db.prepare('SELECT COUNT(*) as count FROM child_health_records').get() as any;
-  const chronicPatients = db.prepare('SELECT COUNT(*) as count FROM chronic_care_records').get() as any;
+  const totalBeneficiaries = await db.prepare('SELECT COUNT(*) as count FROM patients WHERE village IN (?, ?)').get('Shirwal', 'Khed') as any;
+  const pregnantWomen = await db.prepare('SELECT COUNT(*) as count FROM maternal_records').get() as any;
+  const highRiskPregnant = await db.prepare('SELECT COUNT(*) as count FROM maternal_records WHERE high_risk_flag = 1').get() as any;
+  const infants = await db.prepare('SELECT COUNT(*) as count FROM child_health_records').get() as any;
+  const chronicPatients = await db.prepare('SELECT COUNT(*) as count FROM chronic_care_records').get() as any;
   const pendingVisits = 4; // Synthetic pending scheduled visits
-  const pendingReferrals = db.prepare("SELECT COUNT(*) as count FROM referrals WHERE status IN ('created', 'accepted')").get() as any;
+  const pendingReferrals = await db.prepare("SELECT COUNT(*) as count FROM referrals WHERE status IN ('created', 'accepted')").get() as any;
 
   res.json({
     assignedVillage: 'Shirwal & Shirwal-Wadi',
@@ -27,28 +27,28 @@ export const getCommunitySummary = (req: AuthRequest, res: Response) => {
   });
 };
 
-export const getHighRiskRoster = (req: Request, res: Response) => {
-  const maternalHighRisk = db.prepare(`
+export const getHighRiskRoster = async (req: Request, res: Response) => {
+  const maternalHighRisk = await db.prepare(`
     SELECT m.*, p.full_name, p.age, p.phone, p.village, p.blood_group
     FROM maternal_records m
     JOIN patients p ON m.patient_id = p.id
     WHERE m.high_risk_flag = 1
   `).all();
 
-  const chronicHighRisk = db.prepare(`
+  const chronicHighRisk = await db.prepare(`
     SELECT c.*, p.full_name, p.age, p.phone, p.village, p.blood_group
     FROM chronic_care_records c
     JOIN patients p ON c.patient_id = p.id
     WHERE c.risk_level IN ('high', 'moderate')
   `).all();
 
-  const childRoster = db.prepare(`
+  const childRoster = await db.prepare(`
     SELECT ch.*, p.full_name as mother_name, p.village, p.phone
     FROM child_health_records ch
     JOIN patients p ON ch.patient_id = p.id
   `).all();
 
-  const postDischargeFollowUps = db.prepare(`
+  const postDischargeFollowUps = await db.prepare(`
     SELECT d.*, p.full_name as patient_name, p.age, p.gender, p.phone, p.village,
            f.name as facility_name, a.department, a.admission_number
     FROM discharges d
@@ -68,11 +68,11 @@ export const getHighRiskRoster = (req: Request, res: Response) => {
 };
 
 
-export const recordHomeVisit = (req: Request, res: Response) => {
+export const recordHomeVisit = async (req: Request, res: Response) => {
   const { asha_id, patient_id, visit_date, vitals, observations, pregnancy_notes, child_growth_notes, symptoms } = req.body;
 
   const id = `vis-${Date.now()}`;
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO home_visits (id, asha_id, patient_id, visit_date, vitals_json, observations, pregnancy_notes, child_growth_notes, symptoms, sync_status)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')
   `).run(
@@ -90,23 +90,23 @@ export const recordHomeVisit = (req: Request, res: Response) => {
   res.status(201).json({ message: 'Home visit recorded successfully', id });
 };
 
-export const syncOfflineVisits = (req: Request, res: Response) => {
+export const syncOfflineVisits = async (req: Request, res: Response) => {
   const { visits } = req.body; // Array of offline recorded visits
 
   if (!Array.isArray(visits) || visits.length === 0) {
     return res.json({ syncedCount: 0, message: 'No records to sync' });
   }
 
-  const insert = db.prepare(`
-    INSERT INTO home_visits (id, asha_id, patient_id, visit_date, vitals_json, observations, pregnancy_notes, child_growth_notes, symptoms, sync_status)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')
-  `);
-
   let count = 0;
-  db.transaction(() => {
+  await db.transaction(async (trx) => {
+    const insert = trx.prepare(`
+      INSERT INTO home_visits (id, asha_id, patient_id, visit_date, vitals_json, observations, pregnancy_notes, child_growth_notes, symptoms, sync_status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')
+    `);
+
     for (const v of visits) {
       const id = v.id || `vis-sync-${Date.now()}-${count++}`;
-      insert.run(
+      await insert.run(
         id,
         v.asha_id || 'usr-asha-1',
         v.patient_id || 'pat-meera',

@@ -10,9 +10,6 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
 
-// Initialize DB schema
-initializeDatabase();
-
 // CORS configuration
 app.use(cors({
   origin: [FRONTEND_URL, 'http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:3000'],
@@ -52,14 +49,21 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
   });
 });
 
-app.listen(PORT, () => {
-  console.log(`=======================================================`);
-  console.log(`🏥 AROHA+ Backend API Server is running!`);
-  console.log(`🚀 Port: ${PORT}`);
-  console.log(`🔗 Local URL: http://localhost:${PORT}`);
-  console.log(`🔗 Health:    http://localhost:${PORT}/health`);
-  console.log(`🔗 API Base:  http://localhost:${PORT}/api`);
-  console.log(`=======================================================`);
-});
+initializeDatabase()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`=======================================================`);
+      console.log(`🏥 AROHA+ Backend API Server is running!`);
+      console.log(`🚀 Port: ${PORT}`);
+      console.log(`🔗 Local URL: http://localhost:${PORT}`);
+      console.log(`🔗 Health:    http://localhost:${PORT}/health`);
+      console.log(`🔗 API Base:  http://localhost:${PORT}/api`);
+      console.log(`=======================================================`);
+    });
+  })
+  .catch((err) => {
+    console.error('❌ Failed to initialize database schema:', err);
+    process.exit(1);
+  });
 
 export default app;

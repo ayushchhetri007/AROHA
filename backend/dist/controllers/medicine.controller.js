@@ -5,7 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.updateMedicineStock = exports.searchMedicines = void 0;
 const db_js_1 = __importDefault(require("../config/db.js"));
-const searchMedicines = (req, res) => {
+const searchMedicines = async (req, res) => {
     const { query, district, facility_id } = req.query;
     let sql = `
     SELECT m.*, f.name as facility_name, f.type as facility_type, f.district, f.taluka, f.phone as facility_phone
@@ -15,7 +15,7 @@ const searchMedicines = (req, res) => {
   `;
     const params = [];
     if (query) {
-        sql += ' AND (m.name LIKE ? OR m.generic_name LIKE ? OR m.category LIKE ?)';
+        sql += ' AND (m.name ILIKE ? OR m.generic_name ILIKE ? OR m.category ILIKE ?)';
         const term = `%${query}%`;
         params.push(term, term, term);
     }
@@ -28,19 +28,19 @@ const searchMedicines = (req, res) => {
         params.push(facility_id);
     }
     sql += ' ORDER BY m.stock_quantity DESC, m.name ASC LIMIT 100';
-    const medicines = db_js_1.default.prepare(sql).all(...params);
+    const medicines = await db_js_1.default.prepare(sql).all(...params);
     res.json(medicines);
 };
 exports.searchMedicines = searchMedicines;
-const updateMedicineStock = (req, res) => {
+const updateMedicineStock = async (req, res) => {
     const { id } = req.params;
     const { stock_quantity } = req.body;
-    const current = db_js_1.default.prepare('SELECT * FROM medicines WHERE id = ?').get(id);
+    const current = await db_js_1.default.prepare('SELECT * FROM medicines WHERE id = ?').get(id);
     if (!current)
         return res.status(404).json({ error: 'Medicine not found' });
     const qty = Number(stock_quantity);
     const status = qty === 0 ? 'out_of_stock' : qty <= current.reorder_level ? 'low_stock' : 'in_stock';
-    db_js_1.default.prepare(`
+    await db_js_1.default.prepare(`
     UPDATE medicines
     SET stock_quantity = ?, status = ?, last_restocked = CURRENT_TIMESTAMP
     WHERE id = ?

@@ -3,13 +3,13 @@ import db from '../config/db.js';
 
 /**
  * Standard HL7 FHIR R4 Mapping Layer for Seva Health
- * Maps internal SQLite models to compliant FHIR R4 JSON schemas
+ * Maps internal PostgreSQL models to compliant FHIR R4 JSON schemas
  */
 
 // 1. FHIR Patient Mapper
-export const getFhirPatient = (req: Request, res: Response) => {
+export const getFhirPatient = async (req: Request, res: Response) => {
   const patientId = req.params.id || 'pat-meera';
-  const p = db.prepare('SELECT * FROM patients WHERE id = ? OR abha_id = ?').get(patientId, patientId) as any;
+  const p = await db.prepare('SELECT * FROM patients WHERE id = ? OR abha_id = ?').get(patientId, patientId) as any;
 
   if (!p) {
     return res.status(404).json({
@@ -62,10 +62,10 @@ export const getFhirPatient = (req: Request, res: Response) => {
 };
 
 // 2. FHIR Observations (Vitals)
-export const getFhirObservations = (req: Request, res: Response) => {
+export const getFhirObservations = async (req: Request, res: Response) => {
   const patientId = req.params.patientId || (req.query.patient as string) || 'pat-meera';
 
-  const consultations = db.prepare(`
+  const consultations = await db.prepare(`
     SELECT c.id, c.patient_id, c.created_at, c.vitals_json, d.full_name as doctor_name
     FROM consultations c
     JOIN doctors d ON c.doctor_id = d.id
@@ -138,10 +138,10 @@ export const getFhirObservations = (req: Request, res: Response) => {
 };
 
 // 3. FHIR Condition (Diagnoses)
-export const getFhirConditions = (req: Request, res: Response) => {
+export const getFhirConditions = async (req: Request, res: Response) => {
   const patientId = req.params.patientId || (req.query.patient as string) || 'pat-meera';
 
-  const consultations = db.prepare(`
+  const consultations = await db.prepare(`
     SELECT c.id, c.patient_id, c.diagnosis, c.created_at, c.clinical_notes, d.full_name as doctor_name
     FROM consultations c
     JOIN doctors d ON c.doctor_id = d.id
@@ -171,10 +171,10 @@ export const getFhirConditions = (req: Request, res: Response) => {
 };
 
 // 4. FHIR Encounters (Consultations & Admissions)
-export const getFhirEncounters = (req: Request, res: Response) => {
+export const getFhirEncounters = async (req: Request, res: Response) => {
   const patientId = req.params.patientId || (req.query.patient as string) || 'pat-meera';
 
-  const consultations = db.prepare(`
+  const consultations = await db.prepare(`
     SELECT c.id, c.patient_id, c.created_at, f.name as facility_name, d.full_name as doctor_name
     FROM consultations c
     JOIN facilities f ON c.facility_id = f.id
@@ -182,7 +182,7 @@ export const getFhirEncounters = (req: Request, res: Response) => {
     WHERE c.patient_id = ?
   `).all(patientId) as any[];
 
-  const admissions = db.prepare(`
+  const admissions = await db.prepare(`
     SELECT a.id, a.patient_id, a.admission_date, a.discharge_date, a.department, a.status,
            f.name as facility_name, d.full_name as doctor_name
     FROM admissions a
@@ -226,10 +226,10 @@ export const getFhirEncounters = (req: Request, res: Response) => {
 };
 
 // 5. FHIR MedicationRequest (Prescriptions)
-export const getFhirMedicationRequests = (req: Request, res: Response) => {
+export const getFhirMedicationRequests = async (req: Request, res: Response) => {
   const patientId = req.params.patientId || (req.query.patient as string) || 'pat-meera';
 
-  const prescriptions = db.prepare(`
+  const prescriptions = await db.prepare(`
     SELECT pr.id, pr.patient_id, pr.medicines_json, pr.instructions, pr.created_at,
            d.full_name as doctor_name
     FROM prescriptions pr
@@ -275,10 +275,10 @@ export const getFhirMedicationRequests = (req: Request, res: Response) => {
 };
 
 // 6. FHIR DiagnosticReport (Lab Reports)
-export const getFhirDiagnosticReports = (req: Request, res: Response) => {
+export const getFhirDiagnosticReports = async (req: Request, res: Response) => {
   const patientId = req.params.patientId || (req.query.patient as string) || 'pat-meera';
 
-  const tests = db.prepare(`
+  const tests = await db.prepare(`
     SELECT dt.*, f.name as facility_name
     FROM diagnostic_tests dt
     JOIN facilities f ON dt.facility_id = f.id
@@ -308,10 +308,10 @@ export const getFhirDiagnosticReports = (req: Request, res: Response) => {
 };
 
 // 7. FHIR ServiceRequest (Referrals)
-export const getFhirServiceRequests = (req: Request, res: Response) => {
+export const getFhirServiceRequests = async (req: Request, res: Response) => {
   const patientId = req.params.patientId || (req.query.patient as string) || 'pat-meera';
 
-  const referrals = db.prepare(`
+  const referrals = await db.prepare(`
     SELECT r.*, rf.name as from_facility, rec.name as to_facility, d.full_name as doctor_name
     FROM referrals r
     JOIN facilities rf ON r.referring_facility_id = rf.id
@@ -346,10 +346,10 @@ export const getFhirServiceRequests = (req: Request, res: Response) => {
 };
 
 // 8. Full Patient FHIR R4 Bundle (Document Bundle)
-export const getFhirPatientBundle = (req: Request, res: Response) => {
+export const getFhirPatientBundle = async (req: Request, res: Response) => {
   const patientId = req.params.patientId || 'pat-meera';
 
-  const patient = db.prepare('SELECT * FROM patients WHERE id = ?').get(patientId) as any;
+  const patient = await db.prepare('SELECT * FROM patients WHERE id = ?').get(patientId) as any;
   if (!patient) {
     return res.status(404).json({ error: 'Patient not found' });
   }

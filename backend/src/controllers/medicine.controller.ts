@@ -1,7 +1,7 @@
-﻿import { Request, Response } from 'express';
+import { Request, Response } from 'express';
 import db from '../config/db.js';
 
-export const searchMedicines = (req: Request, res: Response) => {
+export const searchMedicines = async (req: Request, res: Response) => {
   const { query, district, facility_id } = req.query;
 
   let sql = `
@@ -13,7 +13,7 @@ export const searchMedicines = (req: Request, res: Response) => {
   const params: any[] = [];
 
   if (query) {
-    sql += ' AND (m.name LIKE ? OR m.generic_name LIKE ? OR m.category LIKE ?)';
+    sql += ' AND (m.name ILIKE ? OR m.generic_name ILIKE ? OR m.category ILIKE ?)';
     const term = `%${query}%`;
     params.push(term, term, term);
   }
@@ -29,22 +29,22 @@ export const searchMedicines = (req: Request, res: Response) => {
   }
 
   sql += ' ORDER BY m.stock_quantity DESC, m.name ASC LIMIT 100';
-  const medicines = db.prepare(sql).all(...params);
+  const medicines = await db.prepare(sql).all(...params);
 
   res.json(medicines);
 };
 
-export const updateMedicineStock = (req: Request, res: Response) => {
+export const updateMedicineStock = async (req: Request, res: Response) => {
   const { id } = req.params;
   const { stock_quantity } = req.body;
 
-  const current = db.prepare('SELECT * FROM medicines WHERE id = ?').get(id) as any;
+  const current = await db.prepare('SELECT * FROM medicines WHERE id = ?').get(id) as any;
   if (!current) return res.status(404).json({ error: 'Medicine not found' });
 
   const qty = Number(stock_quantity);
   const status = qty === 0 ? 'out_of_stock' : qty <= current.reorder_level ? 'low_stock' : 'in_stock';
 
-  db.prepare(`
+  await db.prepare(`
     UPDATE medicines
     SET stock_quantity = ?, status = ?, last_restocked = CURRENT_TIMESTAMP
     WHERE id = ?

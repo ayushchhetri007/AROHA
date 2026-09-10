@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import db from '../config/db.js';
 
-export const triageAssessment = (req: Request, res: Response) => {
+export const triageAssessment = async (req: Request, res: Response) => {
   const { symptoms, duration, severity, vitals, is_pregnant, age } = req.body;
 
   const symLower = (symptoms || '').toLowerCase();
@@ -37,7 +37,7 @@ export const triageAssessment = (req: Request, res: Response) => {
   }
 
   // Nearest emergency capable facility
-  const nearestEmergency = db.prepare('SELECT name, address, phone FROM facilities WHERE emergency_24x7 = 1 ORDER BY id LIMIT 1').get();
+  const nearestEmergency = await db.prepare('SELECT name, address, phone FROM facilities WHERE emergency_24x7 = 1 ORDER BY id LIMIT 1').get();
 
   res.json({
     category,

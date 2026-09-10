@@ -1,7 +1,7 @@
-﻿import { Request, Response } from 'express';
+import { Request, Response } from 'express';
 import db from '../config/db.js';
 
-export const getFacilityQueue = (req: Request, res: Response) => {
+export const getFacilityQueue = async (req: Request, res: Response) => {
   const facilityId = (req.query.facility_id as string) || 'fac-phc-shirwal';
 
   // The Live Token Queue must only ever show genuine live-queue entries.
@@ -10,7 +10,7 @@ export const getFacilityQueue = (req: Request, res: Response) => {
   // need to see - and check in - pending bookings pass ?scope=all.
   const includeBooked = req.query.scope === 'all';
 
-  const tokens = db.prepare(`
+  const tokens = await db.prepare(`
     SELECT q.*, p.full_name as patient_name, p.age, p.gender, p.village,
            a.appointment_number, a.service_name, a.priority,
            d.full_name as doctor_name
@@ -46,18 +46,18 @@ export const getFacilityQueue = (req: Request, res: Response) => {
   });
 };
 
-export const callNextToken = (req: Request, res: Response) => {
+export const callNextToken = async (req: Request, res: Response) => {
   const { facility_id, doctor_id } = req.body;
   const facilityId = facility_id || 'fac-phc-shirwal';
 
   // Mark current in_progress as completed if any
-  db.prepare(`
+  await db.prepare(`
     UPDATE queue_tokens SET status = 'completed'
     WHERE facility_id = ? AND status = 'in_progress'
   `).run(facilityId);
 
   // Find next waiting token
-  const nextToken = db.prepare(`
+  const nextToken = await db.prepare(`
     SELECT * FROM queue_tokens
     WHERE facility_id = ? AND status = 'waiting'
     ORDER BY token_number ASC LIMIT 1
@@ -67,14 +67,14 @@ export const callNextToken = (req: Request, res: Response) => {
     return res.json({ message: 'No more waiting patients in queue' });
   }
 
-  db.prepare(`
+  await db.prepare(`
     UPDATE queue_tokens
     SET status = 'in_progress', called_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `).run(nextToken.id);
 
   // Also update appointment status
-  db.prepare(`
+  await db.prepare(`
     UPDATE appointments SET status = 'in_consultation' WHERE id = ?
   `).run(nextToken.appointment_id);
 
@@ -84,10 +84,10 @@ export const callNextToken = (req: Request, res: Response) => {
   });
 };
 
-export const updateTokenStatus = (req: Request, res: Response) => {
+export const updateTokenStatus = async (req: Request, res: Response) => {
   const { id } = req.params;
   const { status } = req.body; // 'waiting' | 'called' | 'in_progress' | 'completed' | 'skipped'
 
-  db.prepare('UPDATE queue_tokens SET status = ? WHERE id = ?').run(status, id);
+  await db.prepare('UPDATE queue_tokens SET status = ? WHERE id = ?').run(status, id);
   res.json({ message: 'Queue token status updated', id, status });
 };

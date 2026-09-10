@@ -1,10 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useDemo } from '../../store/demoContext';
 import api from '../../api/client';
 import {
   Calendar, User, CheckCircle2, X, Stethoscope, ArrowRight, ArrowLeft,
   Ticket, MapPin, Activity, FileText, ShieldAlert, PhoneCall, Clock,
-  AlertTriangle, Building2, Check, Navigation, AlertCircle, RotateCcw
+  AlertTriangle, Building2, Check, Navigation, AlertCircle, RotateCcw, Mic
 } from 'lucide-react';
 import { TRIAGE_QUESTIONS, evaluateTriage, TriageQuestion, TriageResult, SYMPTOM_SUMMARY_NAMES } from './triageEngine';
 
@@ -25,7 +25,9 @@ function buildSymptomSummarySentence(reportedIds: string[], lang: 'en' | 'hi' | 
   const and = lang === 'mr' ? 'आणि' : lang === 'hi' ? 'और' : 'and';
   const joined = reportedNames.length === 1
     ? reportedNames[0]
-    : `${reportedNames.slice(0, -1).join(', ')} ${and} ${reportedNames[reportedNames.length - 1]}`;
+    : reportedNames.length === 2
+    ? `${reportedNames[0]} ${and} ${reportedNames[1]}`
+    : `${reportedNames.slice(0, -1).join(', ')}, ${and} ${reportedNames[reportedNames.length - 1]}`;
 
   return lang === 'mr'
     ? `तुमच्या उत्तरांनुसार, तुम्ही ${joined} नोंदवले आहे.`
@@ -44,8 +46,11 @@ export const AppointmentBookingModal: React.FC<{
 
   // Wizard state: 1 (Symptoms), 2 (Patient Details), 3 (Doctor), 4 (Date), 5 (Slot), 6 (Summary), 7 (Confirmed)
   const [currentStep, setCurrentStep] = useState<number>(1);
-  const [symptomMode, setSymptomMode] = useState<'select_mode' | 'assessment' | 'describe' | 'guidance' | 'emergency_blocked'>('select_mode');
-  
+  // 'additional_details' = post-assessment Step 1 view: the 10-question
+  // assessment is already complete, so this shows ONLY an optional
+  // supplementary-notes field instead of "Start Symptom Assessment".
+  const [symptomMode, setSymptomMode] = useState<'select_mode' | 'assessment' | 'describe' | 'guidance' | 'emergency_blocked' | 'additional_details'>('select_mode');
+
   // Triage state
   const [triageQuestionIndex, setTriageQuestionIndex] = useState<number>(0);
   const [triageAnswers, setTriageAnswers] = useState<Record<string, boolean>>({});
@@ -55,6 +60,14 @@ export const AppointmentBookingModal: React.FC<{
   const [describeText, setDescribeText] = useState<string>('');
   const [durationText, setDurationText] = useState<string>('2-3 days');
   const [severityLevel, setSeverityLevel] = useState<'mild' | 'moderate' | 'severe'>('moderate');
+
+  // Optional supplementary notes added AFTER a completed structured
+  // assessment - kept entirely separate from the assessment's own
+  // YES/NO answers/results, which are never overwritten by this.
+  const [additionalDetailsText, setAdditionalDetailsText] = useState<string>('');
+  const [isListening, setIsListening] = useState<boolean>(false);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const recognitionRef = useRef<any | null>(null);
 
   // Guidance state
   const [guidanceResult, setGuidanceResult] = useState<{
@@ -135,6 +148,9 @@ export const AppointmentBookingModal: React.FC<{
     setDurationText('2-3 days');
     setSeverityLevel('moderate');
     setTriggeredRedFlag(null);
+    setAdditionalDetailsText('');
+    setIsListening(false);
+    setVoiceError(null);
 
     const targetId = defaultFacilityId || facilityId || 'fac-phc-shirwal';
     setFacilityId(targetId);
@@ -174,30 +190,18 @@ export const AppointmentBookingModal: React.FC<{
           const tLevel = (validAssessment.triage_level || 'PHC').toUpperCase();
           const isEmergency = validAssessment.emergency_flag === 1 || tLevel === 'EMERGENCY';
 
-          // A historical/stale assessment must never automatically trigger
-          // emergency escalation or interrupt a fresh Book OPD session - only
-          // a red flag answered live, in a completed assessment taken during
-          // THIS booking session, should ever route to the emergency screen
-          // (see handleTriageNext). A past emergency-flagged assessment is
-          // therefore treated the same as "no usable assessment" here: the
-          // user lands on Step 1 and explicitly chooses how to proceed.
-          if (isEmergency) {
-            setExistingAssessment(null);
-            setCurrentStep(1);
-            setSymptomMode('select_mode');
-            setTriageQuestionIndex(0);
-            setTriageAnswers({});
-            setCheckingAssessment(false);
-            return;
-          }
-
           let careLabel = 'PRIMARY CARE RECOMMENDED';
           let guidanceNote = validAssessment.recommendation || 'A Primary Health Centre evaluation may be appropriate.';
           let badgeCol = '#b45309';
           let badgeBgCol = '#fef3c7';
           let careType: 'SELF_CARE' | 'PHC' | 'HIGHER_LEVEL' | 'EMERGENCY' = 'PHC';
 
-          if (tLevel.includes('SELF')) {
+          if (isEmergency) {
+            careLabel = 'EMERGENCY CARE RECOMMENDED';
+            careType = 'EMERGENCY';
+            badgeCol = '#dc2626';
+            badgeBgCol = '#fee2e2';
+          } else if (tLevel.includes('SELF')) {
             careLabel = 'SELF-CARE / MILD SYMPTOMS';
             careType = 'SELF_CARE';
             badgeCol = '#059669';
@@ -231,10 +235,13 @@ export const AppointmentBookingModal: React.FC<{
 
           setReason(symList.slice(0, 3).join(', '));
 
-          // FLOW A: Assessment already completed (and not an emergency) -
-          // skip Step 1 and proceed directly to Step 2 (Patient Details)
-          setSymptomMode('guidance');
-          setCurrentStep(2);
+          // FLOW A: Assessment already completed - stay on Step 1 but show
+          // only the optional "Add More Details" supplementary-notes screen,
+          // never the 10-question assessment or "Start Symptom Assessment".
+          // The assessment's own results (guidanceResult/existingAssessment,
+          // set above) are left untouched and remain available to later steps.
+          setSymptomMode('additional_details');
+          setCurrentStep(1);
         } else {
           // FLOW B: No completed assessment found
           setExistingAssessment(null);
@@ -263,6 +270,75 @@ export const AppointmentBookingModal: React.FC<{
     setTriggeredRedFlag(null);
     setSymptomMode('assessment');
     setCurrentStep(1);
+  };
+
+  // Reuses the same additionalDetailsText field for voice input - speech is
+  // transcribed into it, never stored separately, so the patient can always
+  // review/edit what was heard before continuing. Purely local to this
+  // modal; no shared/global speech service exists elsewhere in the app.
+  const startVoiceInput = () => {
+    setVoiceError(null);
+    const SpeechRecognitionCtor: any = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognitionCtor) {
+      setVoiceError(
+        currentLang === 'mr'
+          ? 'या ब्राउझरमध्ये आवाज इनपुट उपलब्ध नाही. कृपया टाइप करा.'
+          : currentLang === 'hi'
+            ? 'इस ब्राउज़र में आवाज़ इनपुट उपलब्ध नहीं है। कृपया टाइप करें।'
+            : 'Voice input is not supported in this browser. Please type instead.'
+      );
+      return;
+    }
+    if (isListening) {
+      recognitionRef.current?.stop();
+      return;
+    }
+    const recognition = new SpeechRecognitionCtor();
+    recognition.lang = currentLang === 'mr' ? 'mr-IN' : currentLang === 'hi' ? 'hi-IN' : 'en-IN';
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+    recognition.onstart = () => setIsListening(true);
+    recognition.onresult = (event: any) => {
+      const transcript = Array.from(event.results as any)
+        .map((r: any) => r[0]?.transcript || '')
+        .join(' ')
+        .trim();
+      if (transcript) {
+        setAdditionalDetailsText((prev) => (prev ? `${prev.trim()} ${transcript}` : transcript));
+      }
+    };
+    recognition.onerror = (event: any) => {
+      setIsListening(false);
+      if (event?.error === 'no-speech') return;
+      setVoiceError(
+        currentLang === 'mr'
+          ? 'आवाज ऐकता आला नाही. कृपया पुन्हा प्रयत्न करा किंवा टाइप करा.'
+          : currentLang === 'hi'
+            ? 'आवाज़ नहीं पहचानी जा सकी। कृपया फिर से प्रयास करें या टाइप करें।'
+            : 'Could not capture voice input. Please try again or type instead.'
+      );
+    };
+    recognition.onend = () => setIsListening(false);
+    recognitionRef.current = recognition;
+    try {
+      recognition.start();
+    } catch {
+      setIsListening(false);
+    }
+  };
+
+  // Continuing from the optional Add More Details screen merges the
+  // supplementary note into the booking's reason field only - the
+  // completed assessment's own results/answers are never modified.
+  const handleContinueFromAdditionalDetails = () => {
+    if (recognitionRef.current && isListening) {
+      recognitionRef.current.stop();
+    }
+    const trimmed = additionalDetailsText.trim();
+    if (trimmed) {
+      setReason((prev) => (prev ? `${prev} | ${trimmed}` : trimmed));
+    }
+    setCurrentStep(2);
   };
 
   const loadFacility = async (id: string) => {
@@ -1488,6 +1564,175 @@ export const AppointmentBookingModal: React.FC<{
                         <button
                           type="button"
                           onClick={() => setCurrentStep(2)}
+                          style={{
+                            padding: '0.85rem 1.6rem',
+                            background: 'linear-gradient(135deg, #0f766e 0%, #0d9488 100%)',
+                            color: '#ffffff',
+                            border: 'none',
+                            borderRadius: '0.75rem',
+                            fontSize: '0.95rem',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.5rem',
+                            boxShadow: '0 4px 6px -1px rgba(15, 118, 110, 0.3)'
+                          }}
+                        >
+                          <span>{t.continueBooking || 'Continue Booking'}</span>
+                          <ArrowRight size={18} />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Post-assessment Symptoms step: the 10-question assessment
+                      is already complete (see on-open effect / FLOW A) - this
+                      shows ONLY an optional supplementary-notes field, never
+                      "Start Symptom Assessment" or Question 1 of 10. Typing,
+                      speaking, or leaving it blank are all valid; Continue is
+                      never blocked on this field. */}
+                  {symptomMode === 'additional_details' && (
+                    <div>
+                      <div style={{
+                        background: 'linear-gradient(135deg, #f0fdfa 0%, #ccfbf1 100%)',
+                        borderRadius: '0.85rem',
+                        border: '1.5px solid #0d9488',
+                        padding: '0.9rem 1.15rem',
+                        marginBottom: '1.25rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.65rem'
+                      }}>
+                        <div style={{
+                          width: '32px',
+                          height: '32px',
+                          borderRadius: '50%',
+                          background: '#0d9488',
+                          color: '#ffffff',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          flexShrink: 0
+                        }}>
+                          <CheckCircle2 size={18} />
+                        </div>
+                        <div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                            <span style={{ fontSize: '0.85rem', fontWeight: 800, color: '#0f766e' }}>
+                              {currentLang === 'mr' ? 'आरोग्य तपासणी पूर्ण झाली' : currentLang === 'hi' ? 'स्वास्थ्य मूल्यांकन पूर्ण हुआ' : 'Health Assessment Completed'}
+                            </span>
+                            <span style={{
+                              background: guidanceResult.badgeBg,
+                              color: guidanceResult.badgeColor,
+                              border: `1px solid ${guidanceResult.badgeColor}`,
+                              padding: '0.1rem 0.5rem',
+                              borderRadius: '1rem',
+                              fontSize: '0.72rem',
+                              fontWeight: 700
+                            }}>
+                              {guidanceResult.careLevel}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <h4 style={{ fontSize: '1.15rem', fontWeight: 800, color: '#0f172a', margin: '0 0 0.4rem' }}>
+                        {currentLang === 'mr' ? 'अधिक तपशील जोडा' : currentLang === 'hi' ? 'अधिक विवरण जोड़ें' : 'Add More Details'}
+                      </h4>
+                      <p style={{ color: '#64748b', fontSize: '0.85rem', margin: '0 0 0.9rem', lineHeight: 1.4 }}>
+                        {currentLang === 'mr'
+                          ? 'तपासणीत समाविष्ट नसलेली इतर कोणतीही लक्षणे किंवा चिंता तुम्ही ऐच्छिकपणे नोंदवू शकता.'
+                          : currentLang === 'hi'
+                            ? 'मूल्यांकन में शामिल न किए गए किसी भी अन्य लक्षण या चिंता का वैकल्पिक रूप से वर्णन करें।'
+                            : 'Optionally describe any other symptoms or concerns that were not covered in the assessment.'}
+                      </p>
+
+                      <textarea
+                        value={additionalDetailsText}
+                        onChange={(e) => setAdditionalDetailsText(e.target.value)}
+                        placeholder={
+                          currentLang === 'mr'
+                            ? 'अतिरिक्त लक्षणे किंवा चिंता येथे टाइप करा...'
+                            : currentLang === 'hi'
+                              ? 'अतिरिक्त लक्षण या चिंताएँ यहाँ टाइप करें...'
+                              : 'Type additional symptoms or concerns here...'
+                        }
+                        rows={4}
+                        style={{
+                          width: '100%',
+                          border: '1.5px solid #cbd5e1',
+                          borderRadius: '0.65rem',
+                          padding: '0.75rem 0.9rem',
+                          fontSize: '0.88rem',
+                          fontFamily: 'inherit',
+                          color: '#1e293b',
+                          resize: 'vertical',
+                          boxSizing: 'border-box',
+                          marginBottom: '0.65rem'
+                        }}
+                      />
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
+                        <button
+                          type="button"
+                          onClick={startVoiceInput}
+                          style={{
+                            background: isListening ? '#fee2e2' : '#f8fafc',
+                            border: `1.5px solid ${isListening ? '#dc2626' : '#cbd5e1'}`,
+                            color: isListening ? '#dc2626' : '#334155',
+                            padding: '0.5rem 0.9rem',
+                            borderRadius: '0.6rem',
+                            fontSize: '0.82rem',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.4rem'
+                          }}
+                        >
+                          <Mic size={15} />
+                          <span>
+                            {isListening
+                              ? (currentLang === 'mr' ? 'ऐकत आहे...' : currentLang === 'hi' ? 'सुन रहा है...' : 'Listening...')
+                              : (currentLang === 'mr' ? 'बोला' : currentLang === 'hi' ? 'बोलें' : 'Speak')}
+                          </span>
+                        </button>
+                        <span style={{ fontSize: '0.78rem', color: '#94a3b8', fontWeight: 600 }}>
+                          {currentLang === 'mr' ? 'ऐच्छिक' : currentLang === 'hi' ? 'वैकल्पिक' : 'Optional'}
+                        </span>
+                      </div>
+
+                      {voiceError && (
+                        <p style={{ color: '#dc2626', fontSize: '0.78rem', margin: '0 0 0.75rem' }}>
+                          {voiceError}
+                        </p>
+                      )}
+
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1rem' }}>
+                        <button
+                          type="button"
+                          onClick={handleStartRetake}
+                          style={{
+                            background: 'transparent',
+                            border: 'none',
+                            color: '#64748b',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.35rem',
+                            cursor: 'pointer',
+                            fontWeight: 600,
+                            fontSize: '0.85rem',
+                            padding: 0
+                          }}
+                        >
+                          <RotateCcw size={14} />
+                          <span>{currentLang === 'mr' ? 'पुन्हा तपासणी करा' : currentLang === 'hi' ? 'पुनः मूल्यांकन करें' : 'Retake Assessment'}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={handleContinueFromAdditionalDetails}
                           style={{
                             padding: '0.85rem 1.6rem',
                             background: 'linear-gradient(135deg, #0f766e 0%, #0d9488 100%)',

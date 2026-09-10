@@ -59,7 +59,7 @@ const ROLE_CONFIGS: RoleCardConfig[] = [
     accentColor: '#059669',
     lightBg: '#ecfdf5',
     borderColor: '#a7f3d0',
-    demoIdentifier: 'anm@demo.com',
+    demoIdentifier: 'ASHA001',
     dashboardName: '/anm/dashboard (Community Field Care)'
   },
   {
@@ -71,7 +71,7 @@ const ROLE_CONFIGS: RoleCardConfig[] = [
     accentColor: '#2563eb',
     lightBg: '#eff6ff',
     borderColor: '#bfdbfe',
-    demoIdentifier: 'doctor@demo.com',
+    demoIdentifier: 'DOC001',
     dashboardName: '/doctor/dashboard (Clinical Care Portal)'
   },
   {
@@ -83,7 +83,7 @@ const ROLE_CONFIGS: RoleCardConfig[] = [
     accentColor: '#4f46e5',
     lightBg: '#eef2ff',
     borderColor: '#c7d2fe',
-    demoIdentifier: 'hospital@demo.com',
+    demoIdentifier: 'HOSP001',
     dashboardName: '/hospital/dashboard (Operations & Beds)'
   },
   {
@@ -95,7 +95,7 @@ const ROLE_CONFIGS: RoleCardConfig[] = [
     accentColor: '#7c3aed',
     lightBg: '#faf5ff',
     borderColor: '#e9d5ff',
-    demoIdentifier: 'admin@demo.com',
+    demoIdentifier: 'ADMIN001',
     dashboardName: '/admin/dashboard (District Command Center)'
   }
 ];
@@ -207,7 +207,7 @@ export const UnifiedLoginPage: React.FC = () => {
         await login('patient', trimmed);
       } else {
         const identifier = staffId.trim() || activeRoleConfig.demoIdentifier;
-        await login(selectedRole, identifier, password || 'demo123');
+        await login(selectedRole, identifier, password || 'Demo@123');
       }
     } catch {
       showToast('Login attempt encountered an issue.', 'error');
@@ -958,7 +958,7 @@ export const UnifiedLoginPage: React.FC = () => {
                   type="text"
                   value={staffId}
                   onChange={(e) => setStaffId(e.target.value)}
-                  placeholder="Enter Employee ID"
+                  placeholder="Enter Employee ID (e.g. ASHA001)"
                   style={{
                     width: '100%',
                     boxSizing: 'border-box',
@@ -980,7 +980,7 @@ export const UnifiedLoginPage: React.FC = () => {
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Enter Password"
+                  placeholder="Enter Password (e.g. Demo@123)"
                   style={{
                     width: '100%',
                     boxSizing: 'border-box',
@@ -1033,7 +1033,7 @@ export const UnifiedLoginPage: React.FC = () => {
                   type="text"
                   value={staffId}
                   onChange={(e) => setStaffId(e.target.value)}
-                  placeholder="Enter Doctor ID"
+                  placeholder="Enter Doctor ID (e.g. DOC001)"
                   style={{
                     width: '100%',
                     boxSizing: 'border-box',
@@ -1055,7 +1055,7 @@ export const UnifiedLoginPage: React.FC = () => {
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Enter Password"
+                  placeholder="Enter Password (e.g. Demo@123)"
                   style={{
                     width: '100%',
                     boxSizing: 'border-box',
@@ -1108,7 +1108,7 @@ export const UnifiedLoginPage: React.FC = () => {
                   type="text"
                   value={staffId}
                   onChange={(e) => setStaffId(e.target.value)}
-                  placeholder="Enter Staff ID"
+                  placeholder="Enter Staff ID (e.g. HOSP001)"
                   style={{
                     width: '100%',
                     boxSizing: 'border-box',
@@ -1130,7 +1130,7 @@ export const UnifiedLoginPage: React.FC = () => {
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Enter Password"
+                  placeholder="Enter Password (e.g. Demo@123)"
                   style={{
                     width: '100%',
                     boxSizing: 'border-box',
@@ -1183,7 +1183,7 @@ export const UnifiedLoginPage: React.FC = () => {
                   type="text"
                   value={staffId}
                   onChange={(e) => setStaffId(e.target.value)}
-                  placeholder="Enter Admin ID"
+                  placeholder="Enter Admin ID (e.g. ADMIN001)"
                   style={{
                     width: '100%',
                     boxSizing: 'border-box',
@@ -1205,7 +1205,7 @@ export const UnifiedLoginPage: React.FC = () => {
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Enter Password"
+                  placeholder="Enter Password (e.g. Demo@123)"
                   style={{
                     width: '100%',
                     boxSizing: 'border-box',

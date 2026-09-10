@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import db from '../config/db.js';
 
-export const getAllFacilities = (req: Request, res: Response) => {
+export const getAllFacilities = async (req: Request, res: Response) => {
   const { district, type, emergency, search } = req.query;
 
   let query = 'SELECT * FROM facilities WHERE 1=1';
@@ -22,31 +22,31 @@ export const getAllFacilities = (req: Request, res: Response) => {
   }
 
   if (search) {
-    query += ' AND (name LIKE ? OR taluka LIKE ? OR district LIKE ? OR address LIKE ?)';
+    query += ' AND (name ILIKE ? OR taluka ILIKE ? OR district ILIKE ? OR address ILIKE ?)';
     const term = `%${search}%`;
     params.push(term, term, term, term);
   }
 
   query += ' ORDER BY type DESC, name ASC';
-  const facilities = db.prepare(query).all(...params);
+  const facilities = await db.prepare(query).all(...params);
 
   res.json(facilities);
 };
 
-export const getFacilityById = (req: Request, res: Response) => {
+export const getFacilityById = async (req: Request, res: Response) => {
   const { id } = req.params;
-  const facility = db.prepare('SELECT * FROM facilities WHERE id = ?').get(id);
+  const facility = await db.prepare('SELECT * FROM facilities WHERE id = ?').get(id);
   if (!facility) return res.status(404).json({ error: 'Facility not found' });
 
-  const services = db.prepare('SELECT * FROM facility_services WHERE facility_id = ?').all(id);
-  const doctors = db.prepare('SELECT * FROM doctors WHERE facility_id = ?').all(id);
-  const medicines = db.prepare('SELECT * FROM medicines WHERE facility_id = ? LIMIT 20').all(id);
-  const equipment = db.prepare('SELECT * FROM facility_equipment WHERE facility_id = ?').all(id);
-  const wards = db.prepare('SELECT * FROM wards WHERE facility_id = ?').all(id) as any[];
-  const staff = db.prepare('SELECT * FROM hospital_staff WHERE facility_id = ?').all(id);
+  const services = await db.prepare('SELECT * FROM facility_services WHERE facility_id = ?').all(id);
+  const doctors = await db.prepare('SELECT * FROM doctors WHERE facility_id = ?').all(id);
+  const medicines = await db.prepare('SELECT * FROM medicines WHERE facility_id = ? LIMIT 20').all(id);
+  const equipment = await db.prepare('SELECT * FROM facility_equipment WHERE facility_id = ?').all(id);
+  const wards = await db.prepare('SELECT * FROM wards WHERE facility_id = ?').all(id) as any[];
+  const staff = await db.prepare('SELECT * FROM hospital_staff WHERE facility_id = ?').all(id);
 
   const bedsByWard = db.prepare('SELECT * FROM beds WHERE ward_id = ?');
-  const wardsWithBeds = wards.map((w) => ({ ...w, beds: bedsByWard.all(w.id) }));
+  const wardsWithBeds = await Promise.all(wards.map(async (w) => ({ ...w, beds: await bedsByWard.all(w.id) })));
 
   res.json({
     facility,

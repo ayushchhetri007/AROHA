@@ -5,7 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.healthAssistant = exports.triageAssessment = void 0;
 const db_js_1 = __importDefault(require("../config/db.js"));
-const triageAssessment = (req, res) => {
+const triageAssessment = async (req, res) => {
     const { symptoms, duration, severity, vitals, is_pregnant, age } = req.body;
     const symLower = (symptoms || '').toLowerCase();
     let category = 'Routine';
@@ -36,7 +36,7 @@ const triageAssessment = (req, res) => {
         advice = 'Priority Care: Schedule an OPD slot at PHC Shirwal. Drink clean boiled water and monitor your vitals.';
     }
     // Nearest emergency capable facility
-    const nearestEmergency = db_js_1.default.prepare('SELECT name, address, phone FROM facilities WHERE emergency_24x7 = 1 ORDER BY id LIMIT 1').get();
+    const nearestEmergency = await db_js_1.default.prepare('SELECT name, address, phone FROM facilities WHERE emergency_24x7 = 1 ORDER BY id LIMIT 1').get();
     res.json({
         category,
         requiresImmediateAttention,

@@ -5,14 +5,14 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.updateTokenStatus = exports.callNextToken = exports.getFacilityQueue = void 0;
 const db_js_1 = __importDefault(require("../config/db.js"));
-const getFacilityQueue = (req, res) => {
+const getFacilityQueue = async (req, res) => {
     const facilityId = req.query.facility_id || 'fac-phc-shirwal';
     // The Live Token Queue must only ever show genuine live-queue entries.
     // 'booked' tokens (appointment made, but not yet checked into the live
     // queue) are excluded by default. Staff-facing queue-management views that
     // need to see - and check in - pending bookings pass ?scope=all.
     const includeBooked = req.query.scope === 'all';
-    const tokens = db_js_1.default.prepare(`
+    const tokens = await db_js_1.default.prepare(`
     SELECT q.*, p.full_name as patient_name, p.age, p.gender, p.village,
            a.appointment_number, a.service_name, a.priority,
            d.full_name as doctor_name
@@ -46,16 +46,16 @@ const getFacilityQueue = (req, res) => {
     });
 };
 exports.getFacilityQueue = getFacilityQueue;
-const callNextToken = (req, res) => {
+const callNextToken = async (req, res) => {
     const { facility_id, doctor_id } = req.body;
     const facilityId = facility_id || 'fac-phc-shirwal';
     // Mark current in_progress as completed if any
-    db_js_1.default.prepare(`
+    await db_js_1.default.prepare(`
     UPDATE queue_tokens SET status = 'completed'
     WHERE facility_id = ? AND status = 'in_progress'
   `).run(facilityId);
     // Find next waiting token
-    const nextToken = db_js_1.default.prepare(`
+    const nextToken = await db_js_1.default.prepare(`
     SELECT * FROM queue_tokens
     WHERE facility_id = ? AND status = 'waiting'
     ORDER BY token_number ASC LIMIT 1
@@ -63,13 +63,13 @@ const callNextToken = (req, res) => {
     if (!nextToken) {
         return res.json({ message: 'No more waiting patients in queue' });
     }
-    db_js_1.default.prepare(`
+    await db_js_1.default.prepare(`
     UPDATE queue_tokens
     SET status = 'in_progress', called_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `).run(nextToken.id);
     // Also update appointment status
-    db_js_1.default.prepare(`
+    await db_js_1.default.prepare(`
     UPDATE appointments SET status = 'in_consultation' WHERE id = ?
   `).run(nextToken.appointment_id);
     res.json({
@@ -78,10 +78,10 @@ const callNextToken = (req, res) => {
     });
 };
 exports.callNextToken = callNextToken;
-const updateTokenStatus = (req, res) => {
+const updateTokenStatus = async (req, res) => {
     const { id } = req.params;
     const { status } = req.body; // 'waiting' | 'called' | 'in_progress' | 'completed' | 'skipped'
-    db_js_1.default.prepare('UPDATE queue_tokens SET status = ? WHERE id = ?').run(status, id);
+    await db_js_1.default.prepare('UPDATE queue_tokens SET status = ? WHERE id = ?').run(status, id);
     res.json({ message: 'Queue token status updated', id, status });
 };
 exports.updateTokenStatus = updateTokenStatus;

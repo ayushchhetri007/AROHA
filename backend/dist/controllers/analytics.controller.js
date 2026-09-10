@@ -5,14 +5,14 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getStateAnalytics = exports.getDistrictAnalytics = void 0;
 const db_js_1 = __importDefault(require("../config/db.js"));
-const getDistrictAnalytics = (req, res) => {
+const getDistrictAnalytics = async (req, res) => {
     const district = req.query.district || 'Satara';
-    const totalFacilities = db_js_1.default.prepare('SELECT COUNT(*) as count FROM facilities WHERE district = ?').get(district);
-    const totalPatients = db_js_1.default.prepare('SELECT COUNT(*) as count FROM patients WHERE district = ?').get(district);
-    const totalAppointments = db_js_1.default.prepare('SELECT COUNT(*) as count FROM appointments').get();
-    const completedReferrals = db_js_1.default.prepare("SELECT COUNT(*) as count FROM referrals WHERE status IN ('completed', 'attended', 'accepted')").get();
-    const totalReferrals = db_js_1.default.prepare('SELECT COUNT(*) as count FROM referrals').get();
-    const totalMeds = db_js_1.default.prepare(`
+    const totalFacilities = await db_js_1.default.prepare('SELECT COUNT(*) as count FROM facilities WHERE district = ?').get(district);
+    const totalPatients = await db_js_1.default.prepare('SELECT COUNT(*) as count FROM patients WHERE district = ?').get(district);
+    const totalAppointments = await db_js_1.default.prepare('SELECT COUNT(*) as count FROM appointments').get();
+    const completedReferrals = await db_js_1.default.prepare("SELECT COUNT(*) as count FROM referrals WHERE status IN ('completed', 'attended', 'accepted')").get();
+    const totalReferrals = await db_js_1.default.prepare('SELECT COUNT(*) as count FROM referrals').get();
+    const totalMeds = await db_js_1.default.prepare(`
     SELECT COUNT(*) as total,
            SUM(CASE WHEN status = 'out_of_stock' THEN 1 ELSE 0 END) as stockouts,
            SUM(CASE WHEN status = 'in_stock' THEN 1 ELSE 0 END) as instock

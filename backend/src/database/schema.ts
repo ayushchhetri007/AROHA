@@ -1,7 +1,7 @@
 import db from '../config/db.js';
 
-export function initializeDatabase() {
-  db.exec(`
+export async function initializeDatabase() {
+  await db.exec(`
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
       full_name TEXT NOT NULL,
@@ -10,7 +10,7 @@ export function initializeDatabase() {
       role TEXT NOT NULL,
       facility_id TEXT,
       language TEXT DEFAULT 'mr',
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TABLE IF NOT EXISTS patients (
@@ -27,7 +27,11 @@ export function initializeDatabase() {
       blood_group TEXT,
       emergency_contact TEXT,
       consent_status INTEGER DEFAULT 1,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      dob TEXT,
+      address TEXT,
+      pin_code TEXT,
+      state TEXT DEFAULT 'Maharashtra'
     );
 
     CREATE TABLE IF NOT EXISTS family_members (
@@ -55,7 +59,7 @@ export function initializeDatabase() {
       total_beds INTEGER DEFAULT 0,
       available_beds INTEGER DEFAULT 0,
       queue_wait_minutes INTEGER DEFAULT 15,
-      last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
+      last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TABLE IF NOT EXISTS facility_services (
@@ -74,7 +78,7 @@ export function initializeDatabase() {
       category TEXT NOT NULL,
       quantity_available INTEGER,
       is_available INTEGER DEFAULT 1,
-      last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
+      last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (facility_id) REFERENCES facilities(id) ON DELETE CASCADE
     );
 
@@ -105,7 +109,7 @@ export function initializeDatabase() {
       status TEXT DEFAULT 'scheduled',
       priority TEXT DEFAULT 'normal',
       reason TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE,
       FOREIGN KEY (facility_id) REFERENCES facilities(id) ON DELETE CASCADE
     );
@@ -124,8 +128,8 @@ export function initializeDatabase() {
       status TEXT DEFAULT 'waiting',
       estimated_wait_minutes INTEGER DEFAULT 15,
       counter_room TEXT NOT NULL,
-      called_at DATETIME,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      called_at TIMESTAMP,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (appointment_id) REFERENCES appointments(id) ON DELETE CASCADE,
       FOREIGN KEY (facility_id) REFERENCES facilities(id) ON DELETE CASCADE,
       FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE
@@ -142,7 +146,7 @@ export function initializeDatabase() {
       vitals_json TEXT NOT NULL,
       clinical_notes TEXT,
       follow_up_date TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (appointment_id) REFERENCES appointments(id),
       FOREIGN KEY (patient_id) REFERENCES patients(id),
       FOREIGN KEY (doctor_id) REFERENCES doctors(id),
@@ -156,7 +160,7 @@ export function initializeDatabase() {
       doctor_id TEXT NOT NULL,
       medicines_json TEXT NOT NULL,
       instructions TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (consultation_id) REFERENCES consultations(id),
       FOREIGN KEY (patient_id) REFERENCES patients(id)
     );
@@ -173,8 +177,12 @@ export function initializeDatabase() {
       result_summary TEXT,
       report_url TEXT,
       turnaround_time TEXT DEFAULT '2 hours',
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      completed_at DATETIME,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      completed_at TIMESTAMP,
+      sample_status TEXT DEFAULT 'collected',
+      processing_status TEXT DEFAULT 'in_progress',
+      equipment_name TEXT DEFAULT 'Automated Hematology Analyzer 5-Part',
+      technician_notes TEXT DEFAULT 'Sample validated by Senior Lab Technician',
       FOREIGN KEY (patient_id) REFERENCES patients(id),
       FOREIGN KEY (facility_id) REFERENCES facilities(id)
     );
@@ -190,7 +198,10 @@ export function initializeDatabase() {
       reorder_level INTEGER NOT NULL,
       unit TEXT NOT NULL,
       status TEXT NOT NULL,
-      last_restocked DATETIME DEFAULT CURRENT_TIMESTAMP,
+      last_restocked TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      batch_number TEXT DEFAULT 'BATCH-2026-A',
+      expiry_date TEXT DEFAULT '2027-12-31',
+      storage_location TEXT DEFAULT 'Main Pharmacy Rack A',
       FOREIGN KEY (facility_id) REFERENCES facilities(id) ON DELETE CASCADE
     );
 
@@ -207,9 +218,9 @@ export function initializeDatabase() {
       summary TEXT NOT NULL,
       status TEXT DEFAULT 'created',
       target_date TEXT NOT NULL,
-      completed_at DATETIME,
+      completed_at TIMESTAMP,
       outcome_notes TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (patient_id) REFERENCES patients(id),
       FOREIGN KEY (referring_facility_id) REFERENCES facilities(id),
       FOREIGN KEY (receiving_facility_id) REFERENCES facilities(id)
@@ -221,7 +232,7 @@ export function initializeDatabase() {
       event_type TEXT NOT NULL,
       description TEXT NOT NULL,
       actor_role TEXT NOT NULL,
-      timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+      timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (referral_id) REFERENCES referrals(id) ON DELETE CASCADE
     );
 
@@ -237,7 +248,7 @@ export function initializeDatabase() {
       risk_factors TEXT,
       assigned_asha_id TEXT NOT NULL,
       notes TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (patient_id) REFERENCES patients(id)
     );
 
@@ -253,7 +264,7 @@ export function initializeDatabase() {
       immunization_status_json TEXT NOT NULL,
       nutritional_grade TEXT DEFAULT 'normal',
       assigned_asha_id TEXT NOT NULL,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (patient_id) REFERENCES patients(id)
     );
 
@@ -283,7 +294,7 @@ export function initializeDatabase() {
       child_growth_notes TEXT,
       symptoms TEXT,
       sync_status TEXT DEFAULT 'synced',
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (patient_id) REFERENCES patients(id)
     );
 
@@ -306,7 +317,7 @@ export function initializeDatabase() {
       bed_number TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'Available',
       current_patient_id TEXT,
-      last_cleaned_at DATETIME,
+      last_cleaned_at TIMESTAMP,
       notes TEXT,
       FOREIGN KEY (ward_id) REFERENCES wards(id) ON DELETE CASCADE,
       FOREIGN KEY (facility_id) REFERENCES facilities(id) ON DELETE CASCADE,
@@ -329,7 +340,7 @@ export function initializeDatabase() {
       status TEXT DEFAULT 'Awaiting Assessment',
       provisional_diagnosis TEXT NOT NULL,
       reason TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (patient_id) REFERENCES patients(id),
       FOREIGN KEY (facility_id) REFERENCES facilities(id),
       FOREIGN KEY (ward_id) REFERENCES wards(id),
@@ -349,7 +360,7 @@ export function initializeDatabase() {
       follow_up_notes TEXT,
       responsible_asha_id TEXT,
       follow_up_completed INTEGER DEFAULT 0,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (admission_id) REFERENCES admissions(id) ON DELETE CASCADE,
       FOREIGN KEY (patient_id) REFERENCES patients(id)
     );
@@ -379,7 +390,7 @@ export function initializeDatabase() {
       description TEXT NOT NULL,
       status TEXT DEFAULT 'submitted',
       resolution_notes TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TABLE IF NOT EXISTS audit_logs (
@@ -390,7 +401,7 @@ export function initializeDatabase() {
       resource_id TEXT,
       details TEXT,
       ip_address TEXT,
-      timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+      timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TABLE IF NOT EXISTS health_assessments (
@@ -401,72 +412,10 @@ export function initializeDatabase() {
       recommendation TEXT NOT NULL,
       recommended_facility_id TEXT,
       emergency_flag INTEGER DEFAULT 0,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE
     );
   `);
 
-  // Migration helpers for existing columns on medicines and diagnostic_tests
-  const tryAddColumn = (table: string, columnDef: string) => {
-    try {
-      db.exec(`ALTER TABLE ${table} ADD COLUMN ${columnDef};`);
-    } catch {
-      // Column already exists, safe to ignore
-    }
-  };
-
-  tryAddColumn('medicines', 'batch_number TEXT DEFAULT "BATCH-2026-A"');
-  tryAddColumn('medicines', 'expiry_date TEXT DEFAULT "2027-12-31"');
-  tryAddColumn('medicines', 'storage_location TEXT DEFAULT "Main Pharmacy Rack A"');
-
-  tryAddColumn('diagnostic_tests', 'sample_status TEXT DEFAULT "collected"');
-  tryAddColumn('diagnostic_tests', 'processing_status TEXT DEFAULT "in_progress"');
-  tryAddColumn('diagnostic_tests', 'equipment_name TEXT DEFAULT "Automated Hematology Analyzer 5-Part"');
-  tryAddColumn('diagnostic_tests', 'technician_notes TEXT DEFAULT "Sample validated by Senior Lab Technician"');
-
-  // Address and demographic extension for patient registration
-  tryAddColumn('patients', 'dob TEXT');
-  tryAddColumn('patients', 'address TEXT');
-  tryAddColumn('patients', 'pin_code TEXT');
-  tryAddColumn('patients', 'state TEXT DEFAULT "Maharashtra"');
-
-  // Ensure abha_id is nullable (optional) for patient registration
-  try {
-    const pInfo = db.prepare('PRAGMA table_info(patients)').all() as any[];
-    const abhaCol = pInfo.find(c => c.name === 'abha_id');
-    if (abhaCol && abhaCol.notnull === 1) {
-      db.pragma('foreign_keys = OFF');
-      db.exec(`
-        CREATE TABLE patients_migrated (
-          id TEXT PRIMARY KEY,
-          user_id TEXT,
-          abha_id TEXT UNIQUE,
-          full_name TEXT NOT NULL,
-          age INTEGER NOT NULL,
-          gender TEXT NOT NULL,
-          phone TEXT NOT NULL,
-          village TEXT NOT NULL,
-          taluka TEXT NOT NULL,
-          district TEXT NOT NULL,
-          blood_group TEXT,
-          emergency_contact TEXT,
-          consent_status INTEGER DEFAULT 1,
-          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-          dob TEXT,
-          address TEXT,
-          pin_code TEXT,
-          state TEXT DEFAULT 'Maharashtra'
-        );
-        INSERT INTO patients_migrated SELECT id, user_id, abha_id, full_name, age, gender, phone, village, taluka, district, blood_group, emergency_contact, consent_status, created_at, dob, address, pin_code, state FROM patients;
-        DROP TABLE patients;
-        ALTER TABLE patients_migrated RENAME TO patients;
-      `);
-      db.pragma('foreign_keys = ON');
-    }
-  } catch (err) {
-    console.error('Migration check on patients.abha_id:', err);
-  }
-
-  console.log('✅ SQLite Database schema initialized successfully');
+  console.log('✅ PostgreSQL database schema initialized successfully');
 }
-

@@ -2,14 +2,14 @@ import { Request, Response } from 'express';
 import db from '../config/db.js';
 import { AuthRequest } from '../middleware/auth.js';
 
-export const getMe = (req: AuthRequest, res: Response) => {
+export const getMe = async (req: AuthRequest, res: Response) => {
   const user = req.user;
   if (!user) return res.status(401).json({ error: 'Not authenticated' });
 
   // If patient, fetch patient details
   let patientProfile = null;
   if (user.role === 'patient') {
-    patientProfile = db.prepare('SELECT * FROM patients WHERE user_id = ? OR phone = ?').get(user.id, user.phone);
+    patientProfile = await db.prepare('SELECT * FROM patients WHERE user_id = ? OR phone = ?').get(user.id, user.phone);
   }
 
   res.json({
@@ -29,7 +29,7 @@ interface OtpEntry {
 
 const otpCache = new Map<string, OtpEntry>();
 
-export const sendPatientOtp = (req: Request, res: Response) => {
+export const sendPatientOtp = async (req: Request, res: Response) => {
   const { patientId } = req.body;
   if (!patientId || !String(patientId).trim()) {
     return res.status(400).json({ error: 'Please enter your Seva Health Patient ID.' });
@@ -38,8 +38,8 @@ export const sendPatientOtp = (req: Request, res: Response) => {
   const cleanId = String(patientId).trim();
 
   // Search by Patient ID (case-insensitive) or user_id or abha_id
-  const patient = db.prepare(`
-    SELECT * FROM patients 
+  const patient = await db.prepare(`
+    SELECT * FROM patients
     WHERE UPPER(id) = UPPER(?) OR UPPER(user_id) = UPPER(?) OR abha_id = ?
     LIMIT 1
   `).get(cleanId, cleanId, cleanId) as any;
@@ -92,7 +92,7 @@ export const sendPatientOtp = (req: Request, res: Response) => {
   });
 };
 
-export const verifyPatientOtp = (req: Request, res: Response) => {
+export const verifyPatientOtp = async (req: Request, res: Response) => {
   const { patientId, otp } = req.body;
   if (!patientId || !otp) {
     return res.status(400).json({ error: 'Patient ID and OTP code are required.' });
@@ -101,8 +101,8 @@ export const verifyPatientOtp = (req: Request, res: Response) => {
   const cleanId = String(patientId).trim();
   const cleanOtp = String(otp).trim();
 
-  const patient = db.prepare(`
-    SELECT * FROM patients 
+  const patient = await db.prepare(`
+    SELECT * FROM patients
     WHERE UPPER(id) = UPPER(?) OR UPPER(user_id) = UPPER(?) OR abha_id = ?
     LIMIT 1
   `).get(cleanId, cleanId, cleanId) as any;
@@ -139,10 +139,10 @@ export const verifyPatientOtp = (req: Request, res: Response) => {
   // Retrieve or create User session
   let user: any = null;
   if (patient.user_id) {
-    user = db.prepare('SELECT * FROM users WHERE id = ?').get(patient.user_id);
+    user = await db.prepare('SELECT * FROM users WHERE id = ?').get(patient.user_id);
   }
   if (!user && patient.phone) {
-    user = db.prepare('SELECT * FROM users WHERE phone = ?').get(patient.phone);
+    user = await db.prepare('SELECT * FROM users WHERE phone = ?').get(patient.phone);
   }
   if (!user) {
     user = {
@@ -166,8 +166,8 @@ export const verifyPatientOtp = (req: Request, res: Response) => {
   });
 };
 
-export const login = (req: Request, res: Response) => {
-  const { identifier, role: requestedRole } = req.body;
+export const login = async (req: Request, res: Response) => {
+  const { identifier, role: requestedRole, password } = req.body;
   if (!identifier) {
     return res.status(400).json({ error: 'Identification (Patient ID, Mobile, ABHA ID, or Employee ID) is required' });
   }
@@ -179,11 +179,11 @@ export const login = (req: Request, res: Response) => {
 
   // 1. Direct Patient ID or ABHA ID lookup (e.g. P-10452, P-10453, P-10454)
   if (idClean.startsWith('p-') || requestedRole === 'patient') {
-    const patientRecord = db.prepare('SELECT * FROM patients WHERE UPPER(id) = UPPER(?) OR abha_id = ?').get(identifier, identifier) as any;
+    const patientRecord = await db.prepare('SELECT * FROM patients WHERE UPPER(id) = UPPER(?) OR abha_id = ?').get(identifier, identifier) as any;
     if (patientRecord) {
       patientProfile = patientRecord;
       if (patientRecord.user_id) {
-        user = db.prepare('SELECT * FROM users WHERE id = ?').get(patientRecord.user_id);
+        user = await db.prepare('SELECT * FROM users WHERE id = ?').get(patientRecord.user_id);
       }
       if (!user) {
         user = {
@@ -200,39 +200,70 @@ export const login = (req: Request, res: Response) => {
 
   // 2. Direct Demo Account Shortcuts
   if (!user) {
-    if (idClean === 'patient@demo.com') {
-      const p10452 = db.prepare('SELECT * FROM patients WHERE id = ?').get('P-10452') as any;
+    // Demo credentials for the 4 staff roles: ASHA001, DOC001, ADMIN001, HOSP001 (Password: Demo@123)
+    const staffDemoMap: Record<string, { userId: string; role: string; demoId: string; facilityId?: string }> = {
+      'asha001': { userId: 'usr-asha-1', role: 'asha_worker', demoId: 'ASHA001' },
+      'doc001': { userId: 'usr-doc-1', role: 'doctor', demoId: 'DOC001' },
+      'admin001': { userId: 'usr-admin-1', role: 'admin', demoId: 'ADMIN001' },
+      'hosp001': { userId: 'usr-staff-1', role: 'hospital', demoId: 'HOSP001', facilityId: 'fac-dh-satara' }
+    };
+
+    if (staffDemoMap[idClean]) {
+      if (password && password !== 'Demo@123' && password !== 'demo123') {
+        return res.status(401).json({ error: 'Invalid credentials. Password for demo accounts is Demo@123' });
+      }
+      const demoAccount = staffDemoMap[idClean];
+      user = await db.prepare('SELECT * FROM users WHERE id = ?').get(demoAccount.userId) as any;
+      if (user) {
+        user.role = demoAccount.role;
+        user.demo_id = demoAccount.demoId;
+        if (demoAccount.facilityId) user.facility_id = demoAccount.facilityId;
+      }
+    } else if (idClean === 'patient@demo.com') {
+      const p10452 = await db.prepare('SELECT * FROM patients WHERE id = ?').get('P-10452') as any;
       if (p10452) {
         patientProfile = p10452;
-        if (p10452.user_id) user = db.prepare('SELECT * FROM users WHERE id = ?').get(p10452.user_id);
+        if (p10452.user_id) user = await db.prepare('SELECT * FROM users WHERE id = ?').get(p10452.user_id);
       }
       if (!user) {
-        user = db.prepare('SELECT * FROM users WHERE id = ?').get('usr-patient-1');
+        user = await db.prepare('SELECT * FROM users WHERE id = ?').get('usr-patient-1');
       }
-    } else if (idClean === 'anm@demo.com' || (idClean.includes('anm') && requestedRole !== 'patient')) {
-      user = db.prepare('SELECT * FROM users WHERE id = ?').get('usr-asha-1');
+    } else if (idClean === 'anm@demo.com' || (idClean.includes('anm') && requestedRole !== 'patient') || (idClean.includes('asha') && requestedRole !== 'patient')) {
+      if (password && password !== 'Demo@123' && password !== 'demo123') {
+        return res.status(401).json({ error: 'Invalid credentials. Password for demo accounts is Demo@123' });
+      }
+      user = await db.prepare('SELECT * FROM users WHERE id = ?').get('usr-asha-1');
     } else if (idClean === 'doctor@demo.com' || (idClean.includes('doc') && requestedRole !== 'patient')) {
-      user = db.prepare('SELECT * FROM users WHERE id = ?').get('usr-doc-1');
+      if (password && password !== 'Demo@123' && password !== 'demo123') {
+        return res.status(401).json({ error: 'Invalid credentials. Password for demo accounts is Demo@123' });
+      }
+      user = await db.prepare('SELECT * FROM users WHERE id = ?').get('usr-doc-1');
     } else if (idClean === 'hospital@demo.com' || (idClean.includes('hosp') && requestedRole !== 'patient')) {
-      user = db.prepare('SELECT * FROM users WHERE id = ?').get('usr-staff-1');
+      if (password && password !== 'Demo@123' && password !== 'demo123') {
+        return res.status(401).json({ error: 'Invalid credentials. Password for demo accounts is Demo@123' });
+      }
+      user = await db.prepare('SELECT * FROM users WHERE id = ?').get('usr-staff-1');
       if (user) user.role = 'hospital';
     } else if (idClean === 'admin@demo.com' || (idClean.includes('admin') && requestedRole !== 'patient')) {
-      user = db.prepare('SELECT * FROM users WHERE id = ?').get('usr-admin-1');
+      if (password && password !== 'Demo@123' && password !== 'demo123') {
+        return res.status(401).json({ error: 'Invalid credentials. Password for demo accounts is Demo@123' });
+      }
+      user = await db.prepare('SELECT * FROM users WHERE id = ?').get('usr-admin-1');
     }
   }
 
   // 3. Query user by email, phone, or ID
   if (!user) {
-    user = db.prepare('SELECT * FROM users WHERE phone = ? OR email = ? OR id = ?').get(identifier, identifier, identifier) as any;
+    user = await db.prepare('SELECT * FROM users WHERE phone = ? OR email = ? OR id = ?').get(identifier, identifier, identifier) as any;
   }
 
   // 4. Query patient by phone or generic identifier if still not found
   if (!user && !patientProfile) {
-    const patientRecord = db.prepare('SELECT * FROM patients WHERE phone = ? OR UPPER(id) = UPPER(?)').get(identifier, identifier) as any;
+    const patientRecord = await db.prepare('SELECT * FROM patients WHERE phone = ? OR UPPER(id) = UPPER(?)').get(identifier, identifier) as any;
     if (patientRecord) {
       patientProfile = patientRecord;
       if (patientRecord.user_id) {
-        user = db.prepare('SELECT * FROM users WHERE id = ?').get(patientRecord.user_id) as any;
+        user = await db.prepare('SELECT * FROM users WHERE id = ?').get(patientRecord.user_id) as any;
       }
       if (!user) {
         user = {
@@ -254,24 +285,24 @@ export const login = (req: Request, res: Response) => {
     const phone = isPhone ? identifier : `98${Math.floor(10000000 + Math.random() * 90000000)}`;
     const email = isPhone ? `citizen_${phone}@example.com` : identifier;
 
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO users (id, full_name, email, phone, role, language)
       VALUES (?, ?, ?, ?, ?, 'mr')
     `).run(newUserId, 'Citizen Beneficiary', email, phone, requestedRole || 'patient');
 
-    user = db.prepare('SELECT * FROM users WHERE id = ?').get(newUserId) as any;
+    user = await db.prepare('SELECT * FROM users WHERE id = ?').get(newUserId) as any;
 
     const patientId = `pat-${Date.now()}`;
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO patients (id, user_id, abha_id, full_name, age, gender, phone, village, taluka, district, consent_status)
       VALUES (?, ?, ?, ?, 30, 'Other', ?, 'Shirwal', 'Khandala', 'Satara', 1)
     `).run(patientId, newUserId, `91-${Math.floor(1000 + Math.random() * 9000)}-${Math.floor(1000 + Math.random() * 9000)}-${Math.floor(1000 + Math.random() * 9000)}`, 'Citizen Beneficiary', phone);
 
-    patientProfile = db.prepare('SELECT * FROM patients WHERE id = ?').get(patientId);
+    patientProfile = await db.prepare('SELECT * FROM patients WHERE id = ?').get(patientId);
   }
 
   if (!patientProfile && (user.role === 'patient' || requestedRole === 'patient')) {
-    patientProfile = db.prepare('SELECT * FROM patients WHERE user_id = ? OR phone = ?').get(user.id, user.phone);
+    patientProfile = await db.prepare('SELECT * FROM patients WHERE user_id = ? OR phone = ?').get(user.id, user.phone);
   }
 
   // Ensure hospital role is mapped cleanly
@@ -289,13 +320,13 @@ export const login = (req: Request, res: Response) => {
   });
 };
 
-export const switchDemoRole = (req: Request, res: Response) => {
+export const switchDemoRole = async (req: Request, res: Response) => {
   const { role } = req.body;
   const lookupRole = role === 'hospital' ? 'facility_staff' : role;
-  let user = db.prepare('SELECT * FROM users WHERE role = ? ORDER BY id ASC LIMIT 1').get(lookupRole) as any;
+  let user = await db.prepare('SELECT * FROM users WHERE role = ? ORDER BY id ASC LIMIT 1').get(lookupRole) as any;
 
   if (!user && role === 'hospital') {
-    user = db.prepare('SELECT * FROM users WHERE id = ?').get('usr-staff-1') as any;
+    user = await db.prepare('SELECT * FROM users WHERE id = ?').get('usr-staff-1') as any;
   }
 
   if (!user) {
@@ -309,7 +340,7 @@ export const switchDemoRole = (req: Request, res: Response) => {
 
   let patientProfile = null;
   if (user.role === 'patient') {
-    patientProfile = db.prepare('SELECT * FROM patients WHERE user_id = ? OR phone = ?').get(user.id, user.phone);
+    patientProfile = await db.prepare('SELECT * FROM patients WHERE user_id = ? OR phone = ?').get(user.id, user.phone);
   }
 
   res.json({
@@ -320,8 +351,8 @@ export const switchDemoRole = (req: Request, res: Response) => {
 };
 
 
-export const listDemoAccounts = (_req: Request, res: Response) => {
-  const accounts = db.prepare(`
+export const listDemoAccounts = async (_req: Request, res: Response) => {
+  const accounts = await db.prepare(`
     SELECT u.id, u.full_name, u.email, u.phone, u.role, u.facility_id, f.name as facility_name
     FROM users u
     LEFT JOIN facilities f ON u.facility_id = f.id
@@ -329,7 +360,7 @@ export const listDemoAccounts = (_req: Request, res: Response) => {
   res.json(accounts);
 };
 
-export const register = (req: Request, res: Response) => {
+export const register = async (req: Request, res: Response) => {
   const fullName = String(req.body.full_name || req.body.fullName || '').trim();
   const phoneRaw = req.body.phone || req.body.mobileNumber || req.body.mobile;
   const dob = req.body.dob || req.body.dateOfBirth;
@@ -374,7 +405,7 @@ export const register = (req: Request, res: Response) => {
   }
 
   // Prevent duplicate patient registration for the exact same name and phone
-  const existingPatientSame = db.prepare('SELECT id, full_name, phone FROM patients WHERE phone = ? AND LOWER(full_name) = LOWER(?)').get(cleanPhone, fullName.toLowerCase()) as any;
+  const existingPatientSame = await db.prepare('SELECT id, full_name, phone FROM patients WHERE phone = ? AND LOWER(full_name) = LOWER(?)').get(cleanPhone, fullName.toLowerCase()) as any;
   if (existingPatientSame) {
     return res.status(409).json({
       error: `An account already exists for ${fullName} with mobile number ${cleanPhone} (Patient ID: ${existingPatientSame.id}). Please log in with your Patient ID.`
@@ -383,7 +414,7 @@ export const register = (req: Request, res: Response) => {
 
   // Generate unique sequential Seva Health Patient ID (starting from P-10452)
   let nextIdNum = 10452;
-  const pRows = db.prepare("SELECT id FROM patients WHERE id LIKE 'P-1%'").all() as { id: string }[];
+  const pRows = await db.prepare("SELECT id FROM patients WHERE id LIKE 'P-1%'").all() as { id: string }[];
   for (const r of pRows) {
     const parsed = parseInt(r.id.replace('P-', ''), 10);
     if (!isNaN(parsed) && parsed >= nextIdNum && parsed < 20000) {
@@ -393,8 +424,8 @@ export const register = (req: Request, res: Response) => {
 
   let patientId = `P-${nextIdNum}`;
   while (
-    db.prepare('SELECT id FROM patients WHERE id = ?').get(patientId) ||
-    db.prepare('SELECT id FROM users WHERE id = ?').get(`usr-${patientId.toLowerCase()}`)
+    (await db.prepare('SELECT id FROM patients WHERE id = ?').get(patientId)) ||
+    (await db.prepare('SELECT id FROM users WHERE id = ?').get(`usr-${patientId.toLowerCase()}`))
   ) {
     nextIdNum += 1;
     patientId = `P-${nextIdNum}`;
@@ -403,12 +434,12 @@ export const register = (req: Request, res: Response) => {
   // Create dedicated patient user session in users table
   const userId = `usr-${patientId.toLowerCase()}`;
   let safeEmail = email ? email : `${patientId.toLowerCase()}@sevahealth.local`;
-  if (db.prepare('SELECT id FROM users WHERE email = ?').get(safeEmail)) {
+  if (await db.prepare('SELECT id FROM users WHERE email = ?').get(safeEmail)) {
     safeEmail = `${patientId.toLowerCase()}.${cleanPhone}@sevahealth.local`;
   }
 
   let safePhone = cleanPhone;
-  const existingUserPhone = db.prepare('SELECT id, role FROM users WHERE phone = ?').get(cleanPhone) as any;
+  const existingUserPhone = await db.prepare('SELECT id, role FROM users WHERE phone = ?').get(cleanPhone) as any;
   if (existingUserPhone) {
     safePhone = `${cleanPhone}-${patientId.toLowerCase()}`;
   }
@@ -417,8 +448,8 @@ export const register = (req: Request, res: Response) => {
   const abhaIdRaw = req.body.abha_id || req.body.abhaId;
   const providedAbha = abhaIdRaw && String(abhaIdRaw).trim().length > 0 ? String(abhaIdRaw).trim() : null;
 
-  const insertTxn = db.transaction(() => {
-    db.prepare(`
+  await db.transaction(async (trx) => {
+    await trx.prepare(`
       INSERT INTO users (id, full_name, email, phone, role, language)
       VALUES (?, ?, ?, ?, 'patient', ?)
     `).run(
@@ -429,7 +460,7 @@ export const register = (req: Request, res: Response) => {
       preferredLanguage
     );
 
-    db.prepare(`
+    await trx.prepare(`
       INSERT INTO patients (
         id, user_id, abha_id, full_name, age, gender, phone,
         village, taluka, district, blood_group, emergency_contact,
@@ -454,12 +485,10 @@ export const register = (req: Request, res: Response) => {
       pinCode ? String(pinCode).trim() : null,
       state
     );
-  });
+  })();
 
-  insertTxn();
-
-  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
-  const patientProfile = db.prepare('SELECT * FROM patients WHERE id = ?').get(patientId);
+  const user = await db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
+  const patientProfile = await db.prepare('SELECT * FROM patients WHERE id = ?').get(patientId);
 
   res.status(201).json({
     message: 'Registration Successful',
@@ -477,7 +506,7 @@ export const register = (req: Request, res: Response) => {
 // ============================================================================
 // AUTHENTICATED USER PROFILE API (FOR ALL 5 ROLES)
 // ============================================================================
-export const getUserProfile = (req: AuthRequest, res: Response) => {
+export const getUserProfile = async (req: AuthRequest, res: Response) => {
   const user = req.user;
   if (!user) return res.status(401).json({ error: 'Not authenticated' });
 
@@ -499,9 +528,9 @@ export const getUserProfile = (req: AuthRequest, res: Response) => {
 
   if (user.role === 'patient') {
     profileData.roleTitle = 'Patient';
-    let p = db.prepare('SELECT * FROM patients WHERE user_id = ? OR phone = ? OR id = ?').get(user.id, user.phone, user.id) as any;
+    let p = await db.prepare('SELECT * FROM patients WHERE user_id = ? OR phone = ? OR id = ?').get(user.id, user.phone, user.id) as any;
     if (!p && user.phone) {
-      p = db.prepare('SELECT * FROM patients WHERE phone = ?').get(user.phone) as any;
+      p = await db.prepare('SELECT * FROM patients WHERE phone = ?').get(user.phone) as any;
     }
     if (p) {
       const maskedPhone = p.phone && p.phone.length >= 4 ? `******${p.phone.slice(-4)}` : '******5789';
@@ -532,8 +561,8 @@ export const getUserProfile = (req: AuthRequest, res: Response) => {
     }
   } else if (user.role === 'asha_worker') {
     profileData.roleTitle = 'ANM / ASHA / Health Worker';
-    const staff = db.prepare('SELECT * FROM hospital_staff WHERE user_id = ? OR phone = ?').get(user.id, user.phone) as any;
-    const fac = user.facility_id ? db.prepare('SELECT * FROM facilities WHERE id = ?').get(user.facility_id) as any : null;
+    const staff = await db.prepare('SELECT * FROM hospital_staff WHERE user_id = ? OR phone = ?').get(user.id, user.phone) as any;
+    const fac = user.facility_id ? await db.prepare('SELECT * FROM facilities WHERE id = ?').get(user.facility_id) as any : null;
     const maskedPhone = user.phone && user.phone.length >= 4 ? `******${user.phone.slice(-4)}` : '******3211';
 
     profileData.attributes = {
@@ -550,10 +579,10 @@ export const getUserProfile = (req: AuthRequest, res: Response) => {
     };
   } else if (user.role === 'doctor') {
     profileData.roleTitle = 'Doctor';
-    const doc = db.prepare('SELECT * FROM doctors WHERE user_id = ? OR full_name = ?').get(user.id, user.full_name) as any;
-    const staff = db.prepare('SELECT * FROM hospital_staff WHERE user_id = ? OR phone = ?').get(user.id, user.phone) as any;
+    const doc = await db.prepare('SELECT * FROM doctors WHERE user_id = ? OR full_name = ?').get(user.id, user.full_name) as any;
+    const staff = await db.prepare('SELECT * FROM hospital_staff WHERE user_id = ? OR phone = ?').get(user.id, user.phone) as any;
     const facId = doc?.facility_id || user.facility_id;
-    const fac = facId ? db.prepare('SELECT * FROM facilities WHERE id = ?').get(facId) as any : null;
+    const fac = facId ? await db.prepare('SELECT * FROM facilities WHERE id = ?').get(facId) as any : null;
     const maskedPhone = user.phone && user.phone.length >= 4 ? `******${user.phone.slice(-4)}` : '******3212';
 
     profileData.attributes = {
@@ -571,9 +600,9 @@ export const getUserProfile = (req: AuthRequest, res: Response) => {
     };
   } else if (user.role === 'hospital' || user.role === 'facility_staff') {
     profileData.roleTitle = 'Hospital Management';
-    const staff = db.prepare('SELECT * FROM hospital_staff WHERE user_id = ? OR phone = ?').get(user.id, user.phone) as any;
+    const staff = await db.prepare('SELECT * FROM hospital_staff WHERE user_id = ? OR phone = ?').get(user.id, user.phone) as any;
     const facId = user.facility_id || staff?.facility_id || 'fac-phc-shirwal';
-    const fac = facId ? db.prepare('SELECT * FROM facilities WHERE id = ?').get(facId) as any : null;
+    const fac = facId ? await db.prepare('SELECT * FROM facilities WHERE id = ?').get(facId) as any : null;
     const maskedPhone = user.phone && user.phone.length >= 4 ? `******${user.phone.slice(-4)}` : '******3213';
 
     profileData.attributes = {
@@ -616,7 +645,7 @@ interface ForgotIdEntry {
 }
 const forgotIdCache = new Map<string, ForgotIdEntry>();
 
-export const forgotPatientIdSendOtp = (req: Request, res: Response) => {
+export const forgotPatientIdSendOtp = async (req: Request, res: Response) => {
   const { phone } = req.body;
   if (!phone || !String(phone).trim()) {
     return res.status(400).json({ error: 'Please enter your registered mobile number.' });
@@ -629,10 +658,10 @@ export const forgotPatientIdSendOtp = (req: Request, res: Response) => {
   const last10 = cleanPhone.slice(-10);
 
   // Search for patient with this mobile number
-  const patient = db.prepare(`
-    SELECT id, phone FROM patients 
-    WHERE phone LIKE ? 
-    ORDER BY created_at DESC 
+  const patient = await db.prepare(`
+    SELECT id, phone FROM patients
+    WHERE phone LIKE ?
+    ORDER BY created_at DESC
     LIMIT 1
   `).get(`%${last10}`) as any;
 
@@ -696,4 +725,3 @@ export const forgotPatientIdVerifyOtp = (req: Request, res: Response) => {
     message: 'Identity Verified ✓'
   });
 };
-
