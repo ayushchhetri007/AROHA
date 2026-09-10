@@ -13,7 +13,7 @@ import { searchMedicines, updateMedicineStock } from '../controllers/medicine.co
 import { searchInventory, addEquipment, updateEquipment } from '../controllers/inventory.controller.js';
 import { getCommunitySummary, getHighRiskRoster, recordHomeVisit, syncOfflineVisits } from '../controllers/frontline.controller.js';
 import { getDistrictAnalytics, getStateAnalytics } from '../controllers/analytics.controller.js';
-import { triageAssessment, healthAssistant } from '../controllers/ai.controller.js';
+import { triageAssessment, healthAssistant, geminiSymptomTriage } from '../controllers/ai.controller.js';
 import { submitGrievance, getGrievances } from '../controllers/grievance.controller.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { auditLog } from '../middleware/audit.js';
@@ -114,6 +114,7 @@ router.get('/analytics/state', getStateAnalytics);
 // AI Decision Support Triage & Assistant
 router.post('/ai/triage', asyncHandler(triageAssessment));
 router.post('/ai/assistant', healthAssistant);
+router.post('/ai/symptom-triage', asyncHandler(geminiSymptomTriage));
 
 // Grievances & Feedback
 router.post('/grievances', asyncHandler(submitGrievance));

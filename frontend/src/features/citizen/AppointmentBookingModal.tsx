@@ -2,18 +2,18 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useDemo } from '../../store/demoContext';
 import api from '../../api/client';
 import {
-  Calendar, User, CheckCircle2, X, Stethoscope, ArrowRight, ArrowLeft,
+  Calendar, CheckCircle2, X, Stethoscope, ArrowRight, ArrowLeft,
   Ticket, MapPin, Activity, FileText, ShieldAlert, PhoneCall, Clock,
-  AlertTriangle, Building2, Check, Navigation, AlertCircle, RotateCcw, Mic
+  AlertTriangle, Building2, Check, RotateCcw, Mic
 } from 'lucide-react';
-import { TRIAGE_QUESTIONS, evaluateTriage, TriageQuestion, TriageResult, SYMPTOM_SUMMARY_NAMES } from './triageEngine';
+import { TRIAGE_CATEGORY_STYLES } from './triageEngine';
+import { SymptomChatAssessment, GeminiTriageResult } from './SymptomChatAssessment';
 
 // Builds a brief, patient-friendly (non-diagnostic) sentence from the
-// question IDs the patient answered YES to, in the given language. Never
-// invents or asserts a disease/diagnosis - purely reflects reported answers.
-function buildSymptomSummarySentence(reportedIds: string[], lang: 'en' | 'hi' | 'mr'): string {
-  const reportedNames = reportedIds.map((id) => SYMPTOM_SUMMARY_NAMES[id]?.[lang] || SYMPTOM_SUMMARY_NAMES[id]?.en || id);
-
+// symptom names Gemini identified (or reported directly), in the given
+// language. Never invents or asserts a disease/diagnosis - purely reflects
+// what was reported.
+function buildSymptomSummarySentence(reportedNames: string[], lang: 'en' | 'hi' | 'mr'): string {
   if (reportedNames.length === 0) {
     return lang === 'mr'
       ? 'या तपासणीमध्ये समाविष्ट असलेली कोणतीही लक्षणे तुम्ही नोंदवली नाहीत.'
@@ -46,20 +46,11 @@ export const AppointmentBookingModal: React.FC<{
 
   // Wizard state: 1 (Symptoms), 2 (Patient Details), 3 (Doctor), 4 (Date), 5 (Slot), 6 (Summary), 7 (Confirmed)
   const [currentStep, setCurrentStep] = useState<number>(1);
-  // 'additional_details' = post-assessment Step 1 view: the 10-question
+  // 'chat' = AI symptom chatbot (optional suggested tags + free text, sent to
+  // Gemini). 'additional_details' = post-assessment Step 1 view: an
   // assessment is already complete, so this shows ONLY an optional
-  // supplementary-notes field instead of "Start Symptom Assessment".
-  const [symptomMode, setSymptomMode] = useState<'select_mode' | 'assessment' | 'describe' | 'guidance' | 'emergency_blocked' | 'additional_details'>('select_mode');
-
-  // Triage state
-  const [triageQuestionIndex, setTriageQuestionIndex] = useState<number>(0);
-  const [triageAnswers, setTriageAnswers] = useState<Record<string, boolean>>({});
-  const [triggeredRedFlag, setTriggeredRedFlag] = useState<TriageQuestion | null>(null);
-
-  // Description state
-  const [describeText, setDescribeText] = useState<string>('');
-  const [durationText, setDurationText] = useState<string>('2-3 days');
-  const [severityLevel, setSeverityLevel] = useState<'mild' | 'moderate' | 'severe'>('moderate');
+  // supplementary-notes field instead of the chatbot.
+  const [symptomMode, setSymptomMode] = useState<'chat' | 'guidance' | 'emergency_blocked' | 'additional_details'>('chat');
 
   // Optional supplementary notes added AFTER a completed structured
   // assessment - kept entirely separate from the assessment's own
@@ -144,10 +135,6 @@ export const AppointmentBookingModal: React.FC<{
     if (!isOpen) return;
 
     setConfirmedAppointment(null);
-    setDescribeText('');
-    setDurationText('2-3 days');
-    setSeverityLevel('moderate');
-    setTriggeredRedFlag(null);
     setAdditionalDetailsText('');
     setIsListening(false);
     setVoiceError(null);
@@ -213,51 +200,37 @@ export const AppointmentBookingModal: React.FC<{
             badgeBgCol = '#ffedd5';
           }
 
-          // The saved assessment only stores English symptom names, not
-          // question IDs - reverse-map each back to its question to build a
-          // properly localized summary sentence and tag list.
-          const matchedQuestions = symList
-            .map((name) => TRIAGE_QUESTIONS.find((q) => q.name === name))
-            .filter((q): q is TriageQuestion => !!q);
-          const localizedSymList = matchedQuestions.length > 0
-            ? matchedQuestions.map((q) => SYMPTOM_SUMMARY_NAMES[q.id]?.[currentLang] || SYMPTOM_SUMMARY_NAMES[q.id]?.en || q.name)
-            : symList;
-
           setGuidanceResult({
-            symptomsList: localizedSymList,
+            symptomsList: symList,
             careLevel: careLabel,
             careLevelType: careType,
             guidanceText: guidanceNote,
             badgeColor: badgeCol,
             badgeBg: badgeBgCol
           });
-          setSymptomSummarySentence(buildSymptomSummarySentence(matchedQuestions.map((q) => q.id), currentLang));
+          setSymptomSummarySentence(buildSymptomSummarySentence(symList, currentLang));
 
           setReason(symList.slice(0, 3).join(', '));
 
           // FLOW A: Assessment already completed - stay on Step 1 but show
           // only the optional "Add More Details" supplementary-notes screen,
-          // never the 10-question assessment or "Start Symptom Assessment".
-          // The assessment's own results (guidanceResult/existingAssessment,
-          // set above) are left untouched and remain available to later steps.
+          // never the AI symptom chatbot again. The assessment's own results
+          // (guidanceResult/existingAssessment, set above) are left untouched
+          // and remain available to later steps.
           setSymptomMode('additional_details');
           setCurrentStep(1);
         } else {
           // FLOW B: No completed assessment found
           setExistingAssessment(null);
           setCurrentStep(1);
-          setSymptomMode('select_mode');
-          setTriageQuestionIndex(0);
-          setTriageAnswers({});
+          setSymptomMode('chat');
         }
       })
       .catch((err) => {
         console.error('Failed to load patient assessment:', err);
         setExistingAssessment(null);
         setCurrentStep(1);
-        setSymptomMode('select_mode');
-        setTriageQuestionIndex(0);
-        setTriageAnswers({});
+        setSymptomMode('chat');
       })
       .finally(() => {
         setCheckingAssessment(false);
@@ -265,10 +238,7 @@ export const AppointmentBookingModal: React.FC<{
   }, [isOpen, defaultFacilityId, patientProfile?.id, currentUser?.id]);
 
   const handleStartRetake = () => {
-    setTriageQuestionIndex(0);
-    setTriageAnswers({});
-    setTriggeredRedFlag(null);
-    setSymptomMode('assessment');
+    setSymptomMode('chat');
     setCurrentStep(1);
   };
 
@@ -357,92 +327,40 @@ export const AppointmentBookingModal: React.FC<{
   };
 
   // STEP 1 OPTION A: Existing Health Assessment (10 questions, strict completion unless emergency)
-  // 1. Select YES or NO for the current question - stores the answer only,
-  // does not advance. Mirrors the two-step select-then-Next pattern used by
-  // the main Check Your Symptoms assessment elsewhere in the app.
-  const handleSelectTriageAnswer = (answer: boolean) => {
-    const currentQ = TRIAGE_QUESTIONS[triageQuestionIndex];
-    setTriageAnswers((prev) => ({ ...prev, [currentQ.id]: answer }));
-  };
-
-  // 2. Next Question / Complete Assessment - advances only once the current
-  // question has an answer. Emergency red-flag detection is evaluated only
-  // after all 10 questions are answered (not mid-quiz), so answering a
-  // single red-flag question YES never interrupts the assessment in progress.
-  const handleTriageNext = () => {
-    const currentQ = TRIAGE_QUESTIONS[triageQuestionIndex];
-    if (triageAnswers[currentQ.id] === undefined) return; // must select YES or NO first
-
-    if (triageQuestionIndex < TRIAGE_QUESTIONS.length - 1) {
-      setTriageQuestionIndex((prev) => prev + 1);
-      return;
-    }
-
-    // Final question answered - evaluate the completed assessment.
-    // Emergency status is still computed and saved (the underlying triage
-    // logic is unchanged), but within this Book OPD flow it never routes to
-    // a blocking "Emergency Care Recommended" screen - only a brief,
-    // patient-friendly symptom recap is shown, and the user continues
-    // booking normally. (The emergency-care feature itself is untouched
-    // elsewhere in the app.)
-    const evaluated: TriageResult = evaluateTriage(triageAnswers);
-    const reportedIds = TRIAGE_QUESTIONS.filter(q => triageAnswers[q.id] === true).map(q => q.id);
-    const reported = TRIAGE_QUESTIONS
-      .filter(q => triageAnswers[q.id] === true)
-      .map(q => q.name);
-
-    const symptomsSummaryList = reported.length > 0 ? reported : ['General malaise'];
-    const localizedSymptomsList = reportedIds.length > 0
-      ? reportedIds.map((id) => SYMPTOM_SUMMARY_NAMES[id]?.[currentLang] || SYMPTOM_SUMMARY_NAMES[id]?.en || id)
-      : [currentLang === 'mr' ? 'कोणतीही विशिष्ट लक्षणे नाहीत' : currentLang === 'hi' ? 'कोई विशेष लक्षण नहीं' : 'No specific symptoms'];
-
-    let careLabel = 'PRIMARY CARE RECOMMENDED';
-    let guidanceNote = 'A Primary Health Centre evaluation may be appropriate.';
-    let badgeCol = '#b45309';
-    let badgeBgCol = '#fef3c7';
-
-    if (evaluated.category === 'EMERGENCY') {
-      careLabel = 'EMERGENCY CARE RECOMMENDED';
-      guidanceNote = 'Immediate emergency medical attention is recommended based on your responses.';
-      badgeCol = '#dc2626';
-      badgeBgCol = '#fee2e2';
-    } else if (evaluated.category === 'SELF_CARE') {
-      careLabel = 'SELF-CARE / MILD SYMPTOMS';
-      guidanceNote = 'Routine consultation or home monitoring advised if symptoms persist.';
-      badgeCol = '#059669';
-      badgeBgCol = '#d1fae5';
-    } else if (evaluated.category === 'HIGHER_LEVEL') {
-      careLabel = 'SECONDARY CARE RECOMMENDED';
-      guidanceNote = 'Community Health Centre or Sub-District Hospital evaluation suggested.';
-      badgeCol = '#c2410c';
-      badgeBgCol = '#ffedd5';
-    }
+  // AI symptom chatbot completion: replaces the old fixed 10-question Yes/No
+  // triage and the separate free-text "Describe Symptoms" form - Gemini's
+  // structured response covers both (identified symptoms + a triage
+  // category) from either optional suggested tags, free-typed text, or both.
+  const handleBookingChatComplete = (result: GeminiTriageResult, symptomsText: string) => {
+    const style = TRIAGE_CATEGORY_STYLES[result.triage_level];
+    const symptomsSummaryList = result.identified_symptoms.length > 0
+      ? result.identified_symptoms
+      : [symptomsText || 'General symptom report'];
 
     setGuidanceResult({
-      symptomsList: localizedSymptomsList,
-      careLevel: careLabel,
-      careLevelType: evaluated.category,
-      guidanceText: guidanceNote,
-      badgeColor: badgeCol,
-      badgeBg: badgeBgCol
+      symptomsList: symptomsSummaryList,
+      careLevel: style.title[currentLang],
+      careLevelType: result.triage_level,
+      guidanceText: result.recommendation,
+      badgeColor: style.badgeColor,
+      badgeBg: style.badgeBg
     });
-    setSymptomSummarySentence(buildSymptomSummarySentence(reportedIds, currentLang));
-
+    setSymptomSummarySentence(result.patient_message);
     setReason(symptomsSummaryList.slice(0, 3).join(', '));
 
-    // Always continue to the brief symptom summary - never the blocking
+    // Always continue to the brief symptom summary - never a blocking
     // emergency screen - within this booking flow.
     setSymptomMode('guidance');
 
-    // Persist retaken/completed assessment to backend so subsequent bookings and longitudinal records have it
+    // Persist the completed assessment to backend so subsequent bookings and longitudinal records have it
     const activePId = patientProfile?.id || (currentUser?.role === 'patient' ? currentUser?.id : null) || patientIdDisplay;
     api.saveAssessment({
       patient_id: activePId,
       symptoms: symptomsSummaryList,
-      triage_level: evaluated.category,
-      recommendation: guidanceNote,
+      triage_level: result.triage_level,
+      recommendation: result.recommendation,
       recommended_facility_id: facilityId,
-      emergency_flag: evaluated.isEmergency
+      emergency_flag: result.emergency_flag
     }).then((res) => {
       if (res?.assessment) {
         setExistingAssessment(res.assessment);
@@ -451,46 +369,8 @@ export const AppointmentBookingModal: React.FC<{
         detail: { patientId: activePId, assessment: res?.assessment }
       }));
     }).catch((e) => {
-      console.error('Error saving retaken assessment:', e);
+      console.error('Error saving assessment:', e);
     });
-  };
-
-  // STEP 1 OPTION B: Rural-friendly symptom description
-  const handleContinueDescribe = () => {
-    const symptomDetails = describeText.trim() || 'General acute discomfort';
-    const symptomsList = symptomDetails
-      .split(/[,;\n]+/)
-      .map(s => s.trim())
-      .filter(Boolean);
-
-    let careLabel = 'PRIMARY CARE RECOMMENDED';
-    let guidanceNote = 'A Primary Health Centre evaluation may be appropriate.';
-    let badgeCol = '#b45309';
-    let badgeBgCol = '#fef3c7';
-
-    if (severityLevel === 'severe') {
-      careLabel = 'SECONDARY CARE RECOMMENDED';
-      guidanceNote = 'Community Health Centre or Hospital evaluation recommended for severe symptoms.';
-      badgeCol = '#c2410c';
-      badgeBgCol = '#ffedd5';
-    } else if (severityLevel === 'mild') {
-      careLabel = 'PRIMARY / OPD CONSULTATION';
-      guidanceNote = 'Primary Health Centre consultation appropriate.';
-      badgeCol = '#059669';
-      badgeBgCol = '#d1fae5';
-    }
-
-    setGuidanceResult({
-      symptomsList: symptomsList.length > 0 ? symptomsList : ['Unspecified discomfort'],
-      careLevel: careLabel,
-      careLevelType: severityLevel === 'severe' ? 'HIGHER_LEVEL' : 'PHC',
-      guidanceText: guidanceNote,
-      badgeColor: badgeCol,
-      badgeBg: badgeBgCol
-    });
-
-    setReason(`${symptomDetails} (${durationText}, ${severityLevel})`);
-    setSymptomMode('guidance');
   };
 
   // STEP 7: Submit appointment to backend
@@ -832,7 +712,7 @@ export const AppointmentBookingModal: React.FC<{
               {currentStep === 1 && (
                 <div>
                   {/* Mode A/B Selection */}
-                  {symptomMode === 'select_mode' && (
+                  {symptomMode === 'chat' && (
                     <div>
                       <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
                         <div style={{
@@ -858,461 +738,7 @@ export const AppointmentBookingModal: React.FC<{
                         </p>
                       </div>
 
-                      <div style={{ display: 'grid', gap: '1rem' }}>
-                        {/* Option A: Health Assessment / Digital Triage */}
-                        <div
-                          onClick={() => {
-                            setTriageQuestionIndex(0);
-                            setTriageAnswers({});
-                            setSymptomMode('assessment');
-                          }}
-                          style={{
-                            border: '2px solid #0d9488',
-                            borderRadius: '1rem',
-                            padding: '1.25rem',
-                            background: '#f0fdfa',
-                            cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'flex-start',
-                            gap: '1rem',
-                            transition: 'all 0.2s ease'
-                          }}
-                          onMouseEnter={(e) => e.currentTarget.style.transform = 'translateY(-2px)'}
-                          onMouseLeave={(e) => e.currentTarget.style.transform = 'translateY(0)'}
-                        >
-                          <div style={{
-                            width: '44px',
-                            height: '44px',
-                            borderRadius: '0.75rem',
-                            background: '#0d9488',
-                            color: '#ffffff',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            flexShrink: 0
-                          }}>
-                            <Activity size={24} />
-                          </div>
-                          <div style={{ flex: 1 }}>
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                              <h5 style={{ fontSize: '1rem', fontWeight: 800, color: '#0f766e', margin: '0 0 0.25rem' }}>
-                                {t.startSymptomAssessment || 'Start Symptom Assessment'}
-                              </h5>
-                              <span style={{ fontSize: '0.75rem', background: '#0d9488', color: '#ffffff', padding: '0.15rem 0.5rem', borderRadius: '1rem', fontWeight: 700 }}>
-                                {currentLang === 'mr' ? 'मार्गदर्शन' : currentLang === 'hi' ? 'गाइडेंस' : 'Recommended'}
-                              </span>
-                            </div>
-                            <p style={{ color: '#334155', fontSize: '0.84rem', margin: 0, lineHeight: 1.4 }}>
-                              {currentLang === 'mr'
-                                ? '१० सोप्या हो / नाही प्रश्नांची उत्तरे देऊन योग्य आरोग्य मार्गदर्शन मिळवा.'
-                                : currentLang === 'hi'
-                                  ? '१० सरल हाँ / नहीं प्रश्नों के उत्तर देकर उचित स्वास्थ्य मार्गदर्शन प्राप्त करें।'
-                                  : 'Answer 10 simple YES / NO questions using the existing Digital Triage system.'}
-                            </p>
-                          </div>
-                        </div>
-
-                        {/* Option B: Describe Symptoms */}
-                        <div
-                          onClick={() => setSymptomMode('describe')}
-                          style={{
-                            border: '1.5px solid #cbd5e1',
-                            borderRadius: '1rem',
-                            padding: '1.25rem',
-                            background: '#ffffff',
-                            cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'flex-start',
-                            gap: '1rem',
-                            transition: 'all 0.2s ease'
-                          }}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.borderColor = '#0d9488';
-                            e.currentTarget.style.background = '#f8fafc';
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.borderColor = '#cbd5e1';
-                            e.currentTarget.style.background = '#ffffff';
-                          }}
-                        >
-                          <div style={{
-                            width: '44px',
-                            height: '44px',
-                            borderRadius: '0.75rem',
-                            background: '#e2e8f0',
-                            color: '#334155',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            flexShrink: 0
-                          }}>
-                            <FileText size={24} />
-                          </div>
-                          <div style={{ flex: 1 }}>
-                            <h5 style={{ fontSize: '1rem', fontWeight: 800, color: '#1e293b', margin: '0 0 0.25rem' }}>
-                              {t.describeSymptoms || 'Describe Symptoms'}
-                            </h5>
-                            <p style={{ color: '#64748b', fontSize: '0.84rem', margin: 0, lineHeight: 1.4 }}>
-                              {currentLang === 'mr'
-                                ? 'सोप्या भाषेत तुमची लक्षणे, कालावधी आणि तीव्रता सांगा.'
-                                : currentLang === 'hi'
-                                  ? 'सरल भाषा में अपने लक्षण, अवधि और गंभीरता बताएं।'
-                                  : 'Briefly describe what you are experiencing in simple everyday language.'}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div style={{
-                        marginTop: '1.5rem',
-                        padding: '0.85rem 1rem',
-                        background: '#f8fafc',
-                        border: '1px solid #e2e8f0',
-                        borderRadius: '0.75rem',
-                        fontSize: '0.8rem',
-                        color: '#64748b',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '0.5rem'
-                      }}>
-                        <AlertCircle size={16} style={{ color: '#0d9488', flexShrink: 0 }} />
-                        <span>
-                          {currentLang === 'mr'
-                            ? 'टीप: हे केवळ प्राथमिक आरोग्य मार्गदर्शनासाठी आहे, वैद्यकीय निदान नाही.'
-                            : currentLang === 'hi'
-                              ? 'नोट: यह केवल प्रारंभिक स्वास्थ्य मार्गदर्शन के लिए है, चिकित्सीय निदान नहीं।'
-                              : 'Note: This preliminary guidance assists appointment routing and does not claim medical diagnosis.'}
-                        </span>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Option A: Digital Triage Questions */}
-                  {symptomMode === 'assessment' && (() => {
-                    const currentTriageQ = TRIAGE_QUESTIONS[triageQuestionIndex];
-                    const selectedAnswer = triageAnswers[currentTriageQ.id];
-                    const hasAnswer = selectedAnswer !== undefined;
-                    const isYesSelected = selectedAnswer === true;
-                    const isNoSelected = selectedAnswer === false;
-                    const isLastTriageQuestion = triageQuestionIndex === TRIAGE_QUESTIONS.length - 1;
-
-                    return (
-                    <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.85rem' }}>
-                        <span style={{ fontSize: '0.8rem', fontWeight: 700, color: '#0f766e' }}>
-                          {currentLang === 'mr' ? 'प्रश्न' : currentLang === 'hi' ? 'प्रश्न' : 'Question'} {triageQuestionIndex + 1} {currentLang === 'mr' ? 'पैकी' : currentLang === 'hi' ? 'में से' : 'of'} {TRIAGE_QUESTIONS.length}
-                        </span>
-                        <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
-                          {Math.round(((triageQuestionIndex + 1) / TRIAGE_QUESTIONS.length) * 100)}{currentLang === 'mr' ? '% पूर्ण' : currentLang === 'hi' ? '% पूर्ण' : '% Completed'}
-                        </span>
-                      </div>
-
-                      {/* Question progress bar */}
-                      <div style={{ width: '100%', height: '6px', background: '#e2e8f0', borderRadius: '3px', marginBottom: '1.25rem', overflow: 'hidden' }}>
-                        <div style={{
-                          height: '100%',
-                          background: '#0d9488',
-                          width: `${((triageQuestionIndex + 1) / TRIAGE_QUESTIONS.length) * 100}%`,
-                          transition: 'width 0.25s ease'
-                        }} />
-                      </div>
-
-                      {/* Question Card */}
-                      <div style={{
-                        background: '#f8fafc',
-                        border: '1px solid #cbd5e1',
-                        borderRadius: '1rem',
-                        padding: '1.5rem',
-                        marginBottom: '1.5rem',
-                        minHeight: '140px',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        justifyContent: 'center'
-                      }}>
-                        <h4 style={{ fontSize: '1.15rem', fontWeight: 800, color: '#0f172a', margin: '0 0 0.5rem', lineHeight: 1.4 }}>
-                          {currentTriageQ.questionText[currentLang] || currentTriageQ.questionText.en}
-                        </h4>
-                        <p style={{ fontSize: '0.88rem', color: '#475569', margin: 0 }}>
-                          {currentTriageQ.subText[currentLang] || currentTriageQ.subText.en}
-                        </p>
-                      </div>
-
-                      {/* Large YES / NO Buttons */}
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1.25rem' }}>
-                        <button
-                          type="button"
-                          onClick={() => handleSelectTriageAnswer(true)}
-                          aria-pressed={isYesSelected}
-                          style={{
-                            padding: '1.1rem',
-                            background: isYesSelected ? '#dcfce7' : '#f8fafc',
-                            border: isYesSelected ? '2.5px solid #16a34a' : '2px solid #cbd5e1',
-                            color: isYesSelected ? '#15803d' : '#475569',
-                            borderRadius: '0.85rem',
-                            fontSize: '1.1rem',
-                            fontWeight: 800,
-                            cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            gap: '0.5rem',
-                            boxShadow: isYesSelected ? '0 0 0 3px rgba(22, 163, 74, 0.2)' : 'none',
-                            transition: 'all 0.15s ease'
-                          }}
-                        >
-                          <Check size={22} />
-                          <span>{currentLang === 'mr' ? 'होय' : currentLang === 'hi' ? 'हाँ' : 'YES'}</span>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => handleSelectTriageAnswer(false)}
-                          aria-pressed={isNoSelected}
-                          style={{
-                            padding: '1.1rem',
-                            background: isNoSelected ? '#e0f2fe' : '#f8fafc',
-                            border: isNoSelected ? '2.5px solid #0284c7' : '2px solid #94a3b8',
-                            color: isNoSelected ? '#0369a1' : '#475569',
-                            borderRadius: '0.85rem',
-                            fontSize: '1.1rem',
-                            fontWeight: 800,
-                            cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            gap: '0.5rem',
-                            boxShadow: isNoSelected ? '0 0 0 3px rgba(2, 132, 199, 0.2)' : 'none',
-                            transition: 'all 0.15s ease'
-                          }}
-                        >
-                          <X size={22} />
-                          <span>{currentLang === 'mr' ? 'नाही' : currentLang === 'hi' ? 'नहीं' : 'NO'}</span>
-                        </button>
-                      </div>
-
-                      {/* Next Question / Complete Assessment button */}
-                      <div style={{ marginBottom: '1.25rem' }}>
-                        <button
-                          type="button"
-                          onClick={handleTriageNext}
-                          disabled={!hasAnswer}
-                          style={{
-                            width: '100%',
-                            padding: '0.85rem',
-                            background: hasAnswer ? 'linear-gradient(135deg, #0f766e 0%, #0d9488 100%)' : '#e2e8f0',
-                            color: hasAnswer ? '#ffffff' : '#94a3b8',
-                            border: 'none',
-                            borderRadius: '0.85rem',
-                            fontSize: '0.95rem',
-                            fontWeight: 800,
-                            cursor: hasAnswer ? 'pointer' : 'not-allowed',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            gap: '0.5rem',
-                            boxShadow: hasAnswer ? '0 4px 12px rgba(13, 148, 136, 0.3)' : 'none',
-                            transition: 'all 0.15s ease'
-                          }}
-                        >
-                          <span>
-                            {isLastTriageQuestion
-                              ? (currentLang === 'mr' ? 'मूल्यांकन पूर्ण करा' : currentLang === 'hi' ? 'मूल्यांकन पूर्ण करें' : 'Complete Assessment')
-                              : (currentLang === 'mr' ? 'पुढील प्रश्न' : currentLang === 'hi' ? 'अगला प्रश्न' : 'Next Question')}
-                          </span>
-                          <ArrowRight size={18} />
-                        </button>
-                      </div>
-
-                      {/* Previous Question button - a real, clearly bordered
-                          button (not a plain link), matching the app's
-                          existing secondary-button styling language. */}
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (triageQuestionIndex > 0) {
-                              setTriageQuestionIndex(prev => prev - 1);
-                            } else {
-                              setSymptomMode('select_mode');
-                            }
-                          }}
-                          style={{
-                            background: '#ffffff',
-                            border: '1px solid #cbd5e1',
-                            color: '#475569',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '0.4rem',
-                            cursor: 'pointer',
-                            fontWeight: 700,
-                            fontSize: '0.85rem',
-                            padding: '0.55rem 0.9rem',
-                            borderRadius: '8px',
-                            boxShadow: '0 1px 2px rgba(0, 0, 0, 0.04)'
-                          }}
-                        >
-                          <ArrowLeft size={16} />
-                          <span>{t.previousBtn || 'Previous'}</span>
-                        </button>
-
-                        <span style={{ fontSize: '0.78rem', color: hasAnswer ? '#0d9488' : '#94a3b8', fontWeight: hasAnswer ? 700 : 400 }}>
-                          {hasAnswer
-                            ? (currentLang === 'mr' ? '✓ उत्तर निवडले' : currentLang === 'hi' ? '✓ उत्तर चुना गया' : '✓ Answer selected')
-                            : (currentLang === 'mr' ? 'योग्य उत्तरावर क्लिक करा' : currentLang === 'hi' ? 'सही विकल्प चुनें' : 'Select YES or NO')}
-                        </span>
-                      </div>
-                    </div>
-                    );
-                  })()}
-
-                  {/* Option B: Describe Symptoms Form */}
-                  {symptomMode === 'describe' && (
-                    <div>
-                      <div style={{ marginBottom: '1.25rem' }}>
-                        <h4 style={{ fontSize: '1.15rem', fontWeight: 800, color: '#0f172a', margin: '0 0 0.35rem' }}>
-                          {t.describeSymptomsPrompt || 'Describe your symptoms'}
-                        </h4>
-                        <p style={{ color: '#475569', fontSize: '0.85rem', margin: 0 }}>
-                          {currentLang === 'mr' ? 'काय त्रास होत आहे?' : currentLang === 'hi' ? 'क्या समस्या महसूस हो रही है?' : 'What are you experiencing?'}
-                        </p>
-                      </div>
-
-                      {/* Textarea */}
-                      <div style={{ marginBottom: '1.25rem' }}>
-                        <textarea
-                          rows={3}
-                          value={describeText}
-                          onChange={(e) => setDescribeText(e.target.value)}
-                          placeholder={t.symptomPlaceholder || 'Example: fever, cough, headache, stomach pain...'}
-                          style={{
-                            width: '100%',
-                            padding: '0.85rem',
-                            border: '1.5px solid #cbd5e1',
-                            borderRadius: '0.75rem',
-                            fontSize: '0.9rem',
-                            color: '#1e293b',
-                            resize: 'vertical',
-                            boxSizing: 'border-box'
-                          }}
-                        />
-                      </div>
-
-                      {/* Duration */}
-                      <div style={{ marginBottom: '1.25rem' }}>
-                        <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, color: '#334155', marginBottom: '0.5rem' }}>
-                          {t.durationPrompt || 'How long have you had these symptoms?'}
-                        </label>
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.5rem' }}>
-                          {[
-                            { val: '< 24h', label: currentLang === 'mr' ? '< २४ तास' : currentLang === 'hi' ? '< २४ घंटे' : '< 24 hours' },
-                            { val: '2-3 days', label: currentLang === 'mr' ? '२-३ दिवस' : currentLang === 'hi' ? '२-३ दिन' : '2-3 days' },
-                            { val: '1 week', label: currentLang === 'mr' ? '१ आठवडा' : currentLang === 'hi' ? '१ सप्ताह' : '1 week' },
-                            { val: '> 1 week', label: currentLang === 'mr' ? '> १ आठवडा' : currentLang === 'hi' ? '> १ सप्ताह' : '> 1 week' }
-                          ].map((d) => (
-                            <button
-                              key={d.val}
-                              type="button"
-                              onClick={() => setDurationText(d.val)}
-                              style={{
-                                padding: '0.6rem 0.3rem',
-                                background: durationText === d.val ? '#0d9488' : '#f8fafc',
-                                color: durationText === d.val ? '#ffffff' : '#334155',
-                                border: durationText === d.val ? '1px solid #0d9488' : '1px solid #cbd5e1',
-                                borderRadius: '0.6rem',
-                                fontSize: '0.78rem',
-                                fontWeight: durationText === d.val ? 700 : 500,
-                                cursor: 'pointer',
-                                textAlign: 'center'
-                              }}
-                            >
-                              {d.label}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* Severity */}
-                      <div style={{ marginBottom: '1.5rem' }}>
-                        <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, color: '#334155', marginBottom: '0.5rem' }}>
-                          {t.severityPrompt || 'How severe are the symptoms?'}
-                        </label>
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.75rem' }}>
-                          {[
-                            { val: 'mild', label: t.mild || 'Mild', color: '#16a34a', bg: '#f0fdf4' },
-                            { val: 'moderate', label: t.moderate || 'Moderate', color: '#d97706', bg: '#fffbeb' },
-                            { val: 'severe', label: t.severe || 'Severe', color: '#dc2626', bg: '#fef2f2' }
-                          ].map((s) => (
-                            <label
-                              key={s.val}
-                              onClick={() => setSeverityLevel(s.val as any)}
-                              style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '0.5rem',
-                                padding: '0.75rem',
-                                background: severityLevel === s.val ? s.bg : '#ffffff',
-                                border: severityLevel === s.val ? `2px solid ${s.color}` : '1px solid #cbd5e1',
-                                borderRadius: '0.75rem',
-                                cursor: 'pointer'
-                              }}
-                            >
-                              <input
-                                type="radio"
-                                name="severity"
-                                checked={severityLevel === s.val}
-                                onChange={() => setSeverityLevel(s.val as any)}
-                                style={{ accentColor: s.color }}
-                              />
-                              <span style={{ fontSize: '0.85rem', fontWeight: 700, color: s.color }}>
-                                {s.label}
-                              </span>
-                            </label>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* Actions */}
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <button
-                          type="button"
-                          onClick={() => setSymptomMode('select_mode')}
-                          style={{
-                            background: 'transparent',
-                            border: 'none',
-                            color: '#64748b',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '0.35rem',
-                            cursor: 'pointer',
-                            fontWeight: 600,
-                            fontSize: '0.85rem'
-                          }}
-                        >
-                          <ArrowLeft size={16} />
-                          <span>{t.previousBtn || 'Previous'}</span>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={handleContinueDescribe}
-                          style={{
-                            padding: '0.8rem 1.5rem',
-                            background: 'linear-gradient(135deg, #0f766e 0%, #0d9488 100%)',
-                            color: '#ffffff',
-                            border: 'none',
-                            borderRadius: '0.75rem',
-                            fontSize: '0.92rem',
-                            fontWeight: 700,
-                            cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '0.5rem'
-                          }}
-                        >
-                          <span>{t.continueBtn || 'Continue'}</span>
-                          <ArrowRight size={18} />
-                        </button>
-                      </div>
+                      <SymptomChatAssessment currentLang={currentLang} onComplete={handleBookingChatComplete} />
                     </div>
                   )}
 
@@ -1348,11 +774,6 @@ export const AppointmentBookingModal: React.FC<{
                         <p style={{ color: '#7f1d1d', fontSize: '0.9rem', lineHeight: 1.5, margin: '0 0 0.75rem' }}>
                           {t.emergencyWarningText || 'Your response may indicate a symptom that requires immediate medical attention. Please seek emergency medical care.'}
                         </p>
-                        {triggeredRedFlag && (
-                          <div style={{ background: '#ffffff', padding: '0.6rem 0.85rem', borderRadius: '0.5rem', border: '1px solid #fecaca', fontSize: '0.82rem', color: '#991b1b', fontWeight: 600 }}>
-                            {currentLang === 'mr' ? 'गंभीर लक्षण:' : currentLang === 'hi' ? 'गंभीर लक्षण:' : 'Critical Sign:'} {triggeredRedFlag.questionText[currentLang] || triggeredRedFlag.questionText.en}
-                          </div>
-                        )}
                       </div>
 
                       <div style={{ display: 'grid', gap: '0.75rem', marginBottom: '1.25rem' }}>
@@ -1406,10 +827,7 @@ export const AppointmentBookingModal: React.FC<{
                       <button
                         type="button"
                         onClick={() => {
-                          setSymptomMode('select_mode');
-                          setTriageQuestionIndex(0);
-                          setTriageAnswers({});
-                          setTriggeredRedFlag(null);
+                          setSymptomMode('chat');
                         }}
                         style={{
                           background: 'transparent',
@@ -1520,7 +938,7 @@ export const AppointmentBookingModal: React.FC<{
                               if (existingAssessment) {
                                 setCurrentStep(2);
                               } else {
-                                setSymptomMode('select_mode');
+                                setSymptomMode('chat');
                               }
                             }}
                             style={{
@@ -1586,12 +1004,12 @@ export const AppointmentBookingModal: React.FC<{
                     </div>
                   )}
 
-                  {/* Post-assessment Symptoms step: the 10-question assessment
-                      is already complete (see on-open effect / FLOW A) - this
-                      shows ONLY an optional supplementary-notes field, never
-                      "Start Symptom Assessment" or Question 1 of 10. Typing,
-                      speaking, or leaving it blank are all valid; Continue is
-                      never blocked on this field. */}
+                  {/* Post-assessment Symptoms step: an assessment is already
+                      complete (see on-open effect / FLOW A) - this shows ONLY
+                      an optional supplementary-notes field, never the AI
+                      symptom chatbot again. Typing, speaking, or leaving it
+                      blank are all valid; Continue is never blocked on this
+                      field. */}
                   {symptomMode === 'additional_details' && (
                     <div>
                       <div style={{

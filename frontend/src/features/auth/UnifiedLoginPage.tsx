@@ -206,8 +206,14 @@ export const UnifiedLoginPage: React.FC = () => {
         }
         await login('patient', trimmed);
       } else {
-        const identifier = staffId.trim() || activeRoleConfig.demoIdentifier;
-        await login(selectedRole, identifier, password || 'Demo@123');
+        const trimmedId = staffId.trim();
+        const trimmedPassword = password.trim();
+        if (!trimmedId || !trimmedPassword) {
+          showToast('Please enter both User ID and Password.', 'error');
+          setIsSubmitting(false);
+          return;
+        }
+        await login(selectedRole, trimmedId, trimmedPassword);
       }
     } catch {
       showToast('Login attempt encountered an issue.', 'error');

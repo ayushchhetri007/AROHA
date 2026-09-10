@@ -135,7 +135,7 @@ const MainAppContent: React.FC = () => {
     }
 
     // 3. Hospital management can only access facility/hospital operations
-    if (userRole === 'hospital' && currentView === 'admin') {
+    if (userRole === 'hospital' && ['admin', 'doctor', 'frontline'].includes(currentView)) {
       return (
         <div style={{ maxWidth: '600px', margin: '4rem auto', padding: '2.5rem', background: '#ffffff', borderRadius: '16px', border: '1.5px solid #fee2e2', textAlign: 'center', boxShadow: '0 10px 25px rgba(239, 68, 68, 0.08)' }}>
           <div style={{ width: '60px', height: '60px', borderRadius: '50%', background: '#fef2f2', color: '#dc2626', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1.25rem auto' }}>
@@ -152,6 +152,52 @@ const MainAppContent: React.FC = () => {
             style={{ background: '#4f46e5', color: '#ffffff', border: 'none', padding: '0.75rem 1.5rem', borderRadius: '10px', fontWeight: 700, cursor: 'pointer' }}
           >
             Return to Hospital Dashboard
+          </button>
+        </div>
+      );
+    }
+
+    // 4. Doctor can only access the Clinical Care Portal
+    if (userRole === 'doctor' && ['admin', 'hospital', 'facility', 'frontline'].includes(currentView)) {
+      return (
+        <div style={{ maxWidth: '600px', margin: '4rem auto', padding: '2.5rem', background: '#ffffff', borderRadius: '16px', border: '1.5px solid #fee2e2', textAlign: 'center', boxShadow: '0 10px 25px rgba(239, 68, 68, 0.08)' }}>
+          <div style={{ width: '60px', height: '60px', borderRadius: '50%', background: '#fef2f2', color: '#dc2626', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1.25rem auto' }}>
+            <ShieldAlert size={34} />
+          </div>
+          <h2 style={{ fontSize: '1.35rem', fontWeight: 800, color: '#991b1b', margin: '0 0 0.5rem 0' }}>
+            Access Restricted
+          </h2>
+          <p style={{ color: '#4b5563', fontSize: '0.92rem', lineHeight: 1.6, margin: '0 0 1.5rem 0' }}>
+            You are signed in as a <strong>Doctor</strong>. Your scope is restricted to the <strong>Clinical Care Portal</strong>.
+          </p>
+          <button
+            onClick={() => setCurrentView('doctor')}
+            style={{ background: '#2563eb', color: '#ffffff', border: 'none', padding: '0.75rem 1.5rem', borderRadius: '10px', fontWeight: 700, cursor: 'pointer' }}
+          >
+            Return to Clinical Care Portal
+          </button>
+        </div>
+      );
+    }
+
+    // 5. Admin is restricted to the District Command Center
+    if (userRole === 'admin' && ['hospital', 'facility', 'doctor', 'frontline'].includes(currentView)) {
+      return (
+        <div style={{ maxWidth: '600px', margin: '4rem auto', padding: '2.5rem', background: '#ffffff', borderRadius: '16px', border: '1.5px solid #fee2e2', textAlign: 'center', boxShadow: '0 10px 25px rgba(239, 68, 68, 0.08)' }}>
+          <div style={{ width: '60px', height: '60px', borderRadius: '50%', background: '#fef2f2', color: '#dc2626', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1.25rem auto' }}>
+            <ShieldAlert size={34} />
+          </div>
+          <h2 style={{ fontSize: '1.35rem', fontWeight: 800, color: '#991b1b', margin: '0 0 0.5rem 0' }}>
+            Access Restricted
+          </h2>
+          <p style={{ color: '#4b5563', fontSize: '0.92rem', lineHeight: 1.6, margin: '0 0 1.5rem 0' }}>
+            You are signed in as an <strong>Administrator</strong>. Your scope is restricted to the <strong>District Command Center</strong>.
+          </p>
+          <button
+            onClick={() => setCurrentView('admin')}
+            style={{ background: '#7c3aed', color: '#ffffff', border: 'none', padding: '0.75rem 1.5rem', borderRadius: '10px', fontWeight: 700, cursor: 'pointer' }}
+          >
+            Return to Command Center
           </button>
         </div>
       );

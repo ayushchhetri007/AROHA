@@ -3,8 +3,9 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.healthAssistant = exports.triageAssessment = void 0;
+exports.healthAssistant = exports.geminiSymptomTriage = exports.triageAssessment = void 0;
 const db_js_1 = __importDefault(require("../config/db.js"));
+const gemini_js_1 = require("../services/gemini.js");
 const triageAssessment = async (req, res) => {
     const { symptoms, duration, severity, vitals, is_pregnant, age } = req.body;
     const symLower = (symptoms || '').toLowerCase();
@@ -51,6 +52,39 @@ const triageAssessment = async (req, res) => {
     });
 };
 exports.triageAssessment = triageAssessment;
+// Symptom-collection chatbot: replaces the old fixed 10-question Yes/No
+// triage. The patient sends any combination of selected symptom tags and
+// free-typed text; Gemini analyzes it and returns a triage_level/
+// emergency_flag matching the app's existing categories, so the downstream
+// facility-recommendation step (matchRecommendedFacility) and DB storage
+// (health_assessments) work completely unchanged.
+const geminiSymptomTriage = async (req, res) => {
+    const { symptomTags, freeText, language } = req.body;
+    const tags = Array.isArray(symptomTags) ? symptomTags.filter((t) => typeof t === 'string' && t.trim()) : [];
+    const text = typeof freeText === 'string' ? freeText.trim() : '';
+    const lang = language === 'mr' || language === 'hi' ? language : 'en';
+    if (tags.length === 0 && !text) {
+        return res.status(400).json({ error: 'Please select at least one symptom or describe how you are feeling.' });
+    }
+    const combinedParts = [];
+    if (tags.length > 0)
+        combinedParts.push(`Selected symptom tags: ${tags.join(', ')}.`);
+    if (text)
+        combinedParts.push(`Patient's own description: "${text}"`);
+    const combinedText = combinedParts.join(' ');
+    try {
+        const result = await (0, gemini_js_1.getGeminiTriage)(combinedText, lang);
+        res.json({
+            ...result,
+            reportedSymptomsText: combinedText
+        });
+    }
+    catch (err) {
+        console.error('Gemini symptom triage error:', err);
+        res.status(502).json({ error: 'The AI symptom assistant is temporarily unavailable. Please try again in a moment.' });
+    }
+};
+exports.geminiSymptomTriage = geminiSymptomTriage;
 const healthAssistant = (req, res) => {
     const { question, language } = req.body;
     const q = (question || '').toLowerCase();

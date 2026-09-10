@@ -16,6 +16,15 @@
   }
 }
 
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 /* Responsive Split Screen Login Layout */
 @media (max-width: 960px) {
   .login-hero-panel {

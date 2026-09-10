@@ -279,6 +279,13 @@ class ApiClient {
     });
   }
 
+  getGeminiSymptomTriage(symptomTags: string[], freeText: string, language: string = 'en') {
+    return this.request<any>('/ai/symptom-triage', {
+      method: 'POST',
+      body: JSON.stringify({ symptomTags, freeText, language })
+    });
+  }
+
   // Grievance Redressal
   submitGrievance(data: any) {
     return this.request<any>('/grievances', {

@@ -4,28 +4,20 @@ import { useDemo } from '../../store/demoContext';
 import {
   Activity,
   CheckCircle2,
-  XCircle,
   Calendar,
-  Clock,
-  ArrowRight,
-  ArrowLeft,
   X,
   PhoneCall,
   Stethoscope,
   Info,
   Navigation,
   RotateCcw,
-  Building2,
-  AlertTriangle,
-  FileText
+  Building2
 } from 'lucide-react';
 import {
-  TRIAGE_QUESTIONS,
-  evaluateTriage,
   matchRecommendedFacility,
-  TriageLevel,
-  TriageQuestion
+  TRIAGE_CATEGORY_STYLES
 } from './triageEngine';
+import { SymptomChatAssessment, GeminiTriageResult } from './SymptomChatAssessment';
 import { FacilityNavigationMap } from './FacilityNavigationMap';
 import {
   LatLng,
@@ -44,22 +36,16 @@ function hasValidCoords(lat: unknown, lng: unknown): lat is number {
   );
 }
 
-// Display-only translations of each question's short category name, for the
-// "Reported Questionnaire Answers" summary tags. Kept local to this component
-// (rather than changing TRIAGE_QUESTIONS[].name in triageEngine.ts) since that
-// field is also sent to the backend as part of the assessment payload and
-// must stay a single, stable English string there.
-const SYMPTOM_NAME_TRANSLATIONS: Record<string, { en: string; hi: string; mr: string }> = {
-  fever: { en: 'Fever or Chills', hi: 'बुखार या ठंड लगना', mr: 'ताप किंवा थंडी' },
-  respiratory_mild: { en: 'Cough, Cold, or Sore Throat', hi: 'खांसी, जुकाम या गले में खराश', mr: 'खोकला, सर्दी किंवा घसा दुखणे' },
-  body_ache_fatigue: { en: 'Headache, Body Ache, or Fatigue', hi: 'सिरदर्द, बदन दर्द या थकान', mr: 'डोकेदुखी, अंगदुखी किंवा थकवा' },
-  gastro_mild: { en: 'Stomach Pain, Diarrhea, or Nausea', hi: 'पेट दर्द, दस्त या मतली', mr: 'पोटदुखी, जुलाब किंवा मळमळ' },
-  duration_persistent: { en: 'Symptoms Lasting More Than 3-5 Days', hi: '3-5 दिनों से अधिक समय तक लक्षण', mr: '३-५ दिवसांपेक्षा जास्त काळ लक्षणे' },
-  chronic_condition: { en: 'Chronic Condition or Pregnancy', hi: 'पुरानी बीमारी या गर्भावस्था', mr: 'जुनाट आजार किंवा गर्भधारणा' },
-  chest_pain: { en: 'Severe Chest Pain or Pressure', hi: 'गंभीर सीने में दर्द या दबाव', mr: 'तीव्र छातीत दुखणे किंवा दाब' },
-  breathing_distress: { en: 'Severe Difficulty Breathing', hi: 'सांस लेने में गंभीर कठिनाई', mr: 'श्वास घेण्यास तीव्र त्रास' },
-  fainting_seizure: { en: 'Unconsciousness, Fainting, or Seizures', hi: 'बेहोशी, मूर्च्छा या दौरे', mr: 'बेशुद्धी, चक्कर येणे किंवा झटके' },
-  bleeding_paralysis: { en: 'Severe Bleeding or Sudden Paralysis', hi: 'गंभीर रक्तस्राव या अचानक लकवा', mr: 'तीव्र रक्तस्राव किंवा अचानक अर्धांगवायू' }
+const FALLBACK_FACILITY = {
+  id: 'fac-phc-shirwal',
+  name: 'Primary Health Centre Shirwal',
+  type: 'PHC',
+  taluka: 'Khandala',
+  district: 'Satara',
+  address: 'Near Main Bazaar, Shirwal, Maharashtra 412801',
+  phone: '02169-244120',
+  emergency_24x7: 1,
+  queue_wait_minutes: 15
 };
 
 interface SymptomAssessmentModalProps {
@@ -85,8 +71,8 @@ export const SymptomAssessmentModal: React.FC<SymptomAssessmentModalProps> = ({
 }) => {
   const { language, patientProfile, currentUser, showToast, setCurrentView, setPendingFocusedFacilityId } = useDemo();
 
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [answers, setAnswers] = useState<Record<string, boolean>>({});
+  const [chatResult, setChatResult] = useState<GeminiTriageResult | null>(null);
+  const [reportedSymptomsText, setReportedSymptomsText] = useState('');
   const [isCompleted, setIsCompleted] = useState(false);
 
   const [nearbyFacilities, setNearbyFacilities] = useState<any[]>([]);
@@ -111,8 +97,8 @@ export const SymptomAssessmentModal: React.FC<SymptomAssessmentModalProps> = ({
   // Reset state when modal opens
   useEffect(() => {
     if (isOpen) {
-      setCurrentIndex(0);
-      setAnswers({});
+      setChatResult(null);
+      setReportedSymptomsText('');
       setIsCompleted(false);
       setIsDetailModalOpen(false);
       setIsMapModalOpen(false);
@@ -129,24 +115,15 @@ export const SymptomAssessmentModal: React.FC<SymptomAssessmentModalProps> = ({
     }
   }, [isOpen, patientProfile?.district]);
 
-  // Evaluate current triage state
-  const triageResult = evaluateTriage(answers);
+  // Triage styling (badge colors/title/care-tier label) for the current
+  // category, derived from Gemini's response once available.
+  const triageStyle = chatResult ? TRIAGE_CATEGORY_STYLES[chatResult.triage_level] : TRIAGE_CATEGORY_STYLES.PHC;
   const matchedFacilityInfo = matchRecommendedFacility(
-    triageResult.category,
+    triageStyle.category,
     nearbyFacilities,
     patientProfile
   );
-  const recommendedFacility = matchedFacilityInfo.facility || {
-    id: 'fac-phc-shirwal',
-    name: 'Primary Health Centre Shirwal',
-    type: 'PHC',
-    taluka: 'Khandala',
-    district: 'Satara',
-    address: 'Near Main Bazaar, Shirwal, Maharashtra 412801',
-    phone: '02169-244120',
-    emergency_24x7: 1,
-    queue_wait_minutes: 15
-  };
+  const recommendedFacility = matchedFacilityInfo.facility || FALLBACK_FACILITY;
 
 
   // Fetch real doctors (and full facility record, for map coordinates) for
@@ -224,65 +201,29 @@ export const SymptomAssessmentModal: React.FC<SymptomAssessmentModalProps> = ({
 
   if (!isOpen) return null;
 
-  const currentQuestion = TRIAGE_QUESTIONS[currentIndex];
-  const progressPercent = Math.round(((currentIndex + 1) / TRIAGE_QUESTIONS.length) * 100);
-
-  // 1. Select YES or NO
-  const handleSelectAnswer = (val: boolean) => {
-    setAnswers((prev) => ({ ...prev, [currentQuestion.id]: val }));
-  };
-
-  // 2. Next Question / Complete Assessment
-  const handleNext = () => {
-    const val = answers[currentQuestion.id];
-    if (val === undefined) return; // Must select YES or NO
-
-    if (currentIndex < TRIAGE_QUESTIONS.length - 1) {
-      setCurrentIndex((prev) => prev + 1);
-    } else {
-      // Completed all 10 questions: calculate final triage result
-      setIsCompleted(true);
-      const finalTriage = evaluateTriage(answers);
-      saveAssessmentRecord(answers, finalTriage.category, finalTriage.isEmergency);
-    }
-  };
-
-  // 3. Previous Question
-  const handlePrevious = () => {
-    if (currentIndex > 0) {
-      setCurrentIndex((prev) => prev - 1);
-    }
-  };
-
-  // 4. Retake Assessment
-  const handleRetake = () => {
-    setCurrentIndex(0);
-    setAnswers({});
-    setIsCompleted(false);
-  };
-
-  // 5. Save assessment to backend PostgreSQL/SQLite database
-  const saveAssessmentRecord = async (
-    ans: Record<string, boolean>,
-    triageCategory: TriageLevel,
-    isEmergency: boolean
-  ) => {
+  // 1. Save assessment to backend PostgreSQL database. Computes the facility
+  // match directly from the just-received Gemini result (rather than the
+  // render-time `recommendedFacility` closure, which would still reflect
+  // the pre-update default on this synchronous call).
+  const saveAssessmentRecord = async (result: GeminiTriageResult, symptomsText: string) => {
     setSavingAssessment(true);
     try {
       const patientId =
         patientProfile?.id || (currentUser?.role === 'patient' ? currentUser?.id : 'P-10452');
 
-      const reportedSymptoms = Object.keys(ans)
-        .filter((k) => ans[k])
-        .map((k) => TRIAGE_QUESTIONS.find((q) => q.id === k)?.name || k);
+      const matched = matchRecommendedFacility(result.triage_level, nearbyFacilities, patientProfile);
+      const facility = matched.facility || FALLBACK_FACILITY;
+      const reportedSymptoms = result.identified_symptoms.length > 0
+        ? result.identified_symptoms
+        : [symptomsText || 'General symptom report'];
 
       const res = await api.saveAssessment({
         patient_id: patientId,
         symptoms: reportedSymptoms,
-        triage_level: triageCategory,
-        recommendation: `Evaluated ${reportedSymptoms.length} reported symptoms across rural health protocol. Triage result: ${triageCategory}. Recommended facility: ${recommendedFacility.name}.`,
-        recommended_facility_id: recommendedFacility.id,
-        emergency_flag: isEmergency
+        triage_level: result.triage_level,
+        recommendation: result.recommendation,
+        recommended_facility_id: facility.id,
+        emergency_flag: result.emergency_flag
       });
       showToast('Health assessment recorded into your longitudinal medical record.', 'success');
       window.dispatchEvent(new CustomEvent('seva_assessment_updated', {
@@ -291,9 +232,9 @@ export const SymptomAssessmentModal: React.FC<SymptomAssessmentModalProps> = ({
           assessment: res?.assessment || {
             patient_id: patientId,
             symptoms_json: JSON.stringify(reportedSymptoms),
-            triage_level: triageCategory,
-            emergency_flag: isEmergency ? 1 : 0,
-            recommended_facility_id: recommendedFacility.id
+            triage_level: result.triage_level,
+            emergency_flag: result.emergency_flag ? 1 : 0,
+            recommended_facility_id: facility.id
           }
         }
       }));
@@ -302,6 +243,22 @@ export const SymptomAssessmentModal: React.FC<SymptomAssessmentModalProps> = ({
     } finally {
       setSavingAssessment(false);
     }
+  };
+
+  // 2. Gemini chat completion: replaces the old "all 10 questions answered"
+  // completion trigger.
+  const handleChatComplete = (result: GeminiTriageResult, symptomsText: string) => {
+    setChatResult(result);
+    setReportedSymptomsText(symptomsText);
+    setIsCompleted(true);
+    saveAssessmentRecord(result, symptomsText);
+  };
+
+  // 3. Retake Assessment
+  const handleRetake = () => {
+    setChatResult(null);
+    setReportedSymptomsText('');
+    setIsCompleted(false);
   };
 
   // Handle in-app directions click: opens the map as an overlay on top of
@@ -375,7 +332,7 @@ export const SymptomAssessmentModal: React.FC<SymptomAssessmentModalProps> = ({
         {/* MODAL HEADER */}
         <div
           style={{
-            background: isCompleted && triageResult.category === 'EMERGENCY'
+            background: isCompleted && triageStyle.category === 'EMERGENCY'
               ? 'linear-gradient(135deg, #78350f 0%, #b45309 100%)'
               : 'linear-gradient(135deg, #093430 0%, #0d9488 100%)',
             color: '#ffffff',
@@ -397,10 +354,10 @@ export const SymptomAssessmentModal: React.FC<SymptomAssessmentModalProps> = ({
                       ? 'स्वास्थ्य जांच परिणाम एवं मार्गदर्शन'
                       : 'Your Health Assessment Result')
                   : (currentLang === 'mr'
-                      ? 'सर्वसाधारण लक्षण तपासणी'
+                      ? 'AI लक्षण सहाय्यक'
                       : currentLang === 'hi'
-                      ? 'सामान्य लक्षण जांच'
-                      : 'General Symptom Check')}
+                      ? 'AI लक्षण सहायक'
+                      : 'AI Symptom Assistant')}
               </h3>
               <div style={{ fontSize: '0.76rem', color: '#ccfbf1', marginTop: '0.1rem' }}>
                 {isCompleted
@@ -410,10 +367,10 @@ export const SymptomAssessmentModal: React.FC<SymptomAssessmentModalProps> = ({
                       ? 'प्रारंभिक देखभाल सिफारिश एवं निकटतम सार्वजनिक स्वास्थ्य केंद्र'
                       : 'Preliminary Care Recommendation & Nearest Public Facility')
                   : (currentLang === 'mr'
-                      ? 'टप्प्याटप्प्याने डिजिटल त्रिआज व सार्वजनिक आरोग्य मार्गदर्शन'
+                      ? 'तुमची लक्षणे निवडा किंवा टाइप करा'
                       : currentLang === 'hi'
-                      ? 'चरणबद्ध डिजिटल ट्राइएज एवं सार्वजनिक स्वास्थ्य मार्गदर्शन'
-                      : 'Stepped Digital Triage & Public Healthcare Guidance')}
+                      ? 'अपने लक्षण चुनें या टाइप करें'
+                      : 'Select or type your symptoms below')}
               </div>
             </div>
           </div>
@@ -471,281 +428,27 @@ export const SymptomAssessmentModal: React.FC<SymptomAssessmentModalProps> = ({
         {/* MODAL BODY */}
         <div style={{ padding: '1.15rem 1.25rem', overflowY: 'auto', flex: 1 }}>
           {!isCompleted ? (
-            /* ACTIVE STEPPED QUESTION VIEW */
-            <div>
-              {/* PROGRESS BAR & STEP COUNTER */}
-              <div style={{ marginBottom: '1rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem', fontSize: '0.8rem', fontWeight: 600, color: '#475569' }}>
-                  <span>
-                    {currentLang === 'mr' ? 'प्रश्न' : currentLang === 'hi' ? 'प्रश्न' : 'Question'} <strong>{currentIndex + 1}</strong>{' '}
-                    {currentLang === 'mr' ? 'पैकी' : currentLang === 'hi' ? 'में से' : 'of'} {TRIAGE_QUESTIONS.length}
-                  </span>
-                  <span style={{ color: '#0d9488', fontWeight: 800 }}>
-                    {progressPercent}{currentLang === 'mr' ? '% पूर्ण' : currentLang === 'hi' ? '% पूर्ण' : '% Completed'}
-                  </span>
-                </div>
-                <div style={{ width: '100%', height: '7px', background: '#e2e8f0', borderRadius: '9999px', overflow: 'hidden' }}>
-                  <div
-                    style={{
-                      width: `${progressPercent}%`,
-                      height: '100%',
-                      background: currentQuestion.isEmergencyRedFlag
-                        ? 'linear-gradient(90deg, #f97316, #dc2626)'
-                        : 'linear-gradient(90deg, #14b8a6, #0d9488)',
-                      transition: 'width 0.25s ease'
-                    }}
-                  />
-                </div>
-              </div>
-
-              {/* QUESTION CARD */}
-              <div
-                style={{
-                  background: currentQuestion.isEmergencyRedFlag ? '#fff7ed' : '#f8fafc',
-                  border: currentQuestion.isEmergencyRedFlag ? '1.5px solid #fed7aa' : '1.5px solid #e2e8f0',
-                  borderRadius: '12px',
-                  padding: '1.15rem 1.15rem',
-                  textAlign: 'center',
-                  marginBottom: '1.15rem'
-                }}
-              >
-                {currentQuestion.isEmergencyRedFlag && (
-                  <div
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '0.3rem',
-                      fontSize: '0.7rem',
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.07em',
-                      color: '#c2410c',
-                      fontWeight: 800,
-                      marginBottom: '0.5rem',
-                      background: '#ffedd5',
-                      padding: '0.15rem 0.55rem',
-                      borderRadius: '9999px'
-                    }}
-                  >
-                    <AlertTriangle size={12} />
-                    <span>{currentLang === 'mr' ? 'तीव्र धोक्याची तपासणी' : currentLang === 'hi' ? 'गंभीर जोखिम जांच' : 'Acute Red-Flag Screening'}</span>
-                  </div>
-                )}
-
-                <h4
-                  style={{
-                    fontSize: '1.4rem',
-                    fontWeight: 800,
-                    color: '#0f172a',
-                    lineHeight: 1.3,
-                    margin: '0 0 0.5rem 0'
-                  }}
-                >
-                  {currentQuestion.questionText[currentLang]}
-                </h4>
-
-                {/* Supporting description, in the user's selected language only */}
-                <div style={{ fontSize: '0.95rem', color: '#64748b', fontWeight: 500 }}>
-                  {currentQuestion.subText[currentLang]}
-                </div>
-              </div>
-
-              {/* YES / NO BUTTONS */}
-              {(() => {
-                const isYesSelected = answers[currentQuestion.id] === true;
-                const isNoSelected = answers[currentQuestion.id] === false;
-                const hasAnswer = answers[currentQuestion.id] !== undefined;
-                const isLastQuestion = currentIndex === TRIAGE_QUESTIONS.length - 1;
-
-                return (
-                  <>
-                    <div
-                      style={{
-                        display: 'grid',
-                        gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-                        gap: '0.85rem',
-                        marginBottom: '1.1rem'
-                      }}
-                    >
-                      {/* YES BUTTON */}
-                      <button
-                        type="button"
-                        onClick={() => handleSelectAnswer(true)}
-                        aria-pressed={isYesSelected}
-                        style={{
-                          padding: '0.85rem 0.75rem',
-                          borderRadius: '10px',
-                          border: isYesSelected ? '2.5px solid #0d9488' : '1.5px solid #cbd5e1',
-                          background: isYesSelected ? '#f0fdfa' : '#ffffff',
-                          color: isYesSelected ? '#0f766e' : '#334155',
-                          fontSize: '1.2rem',
-                          fontWeight: 900,
-                          cursor: 'pointer',
-                          boxShadow: isYesSelected
-                            ? '0 0 0 3px rgba(13, 148, 136, 0.25), 0 4px 12px rgba(13, 148, 136, 0.15)'
-                            : '0 2px 8px rgba(0, 0, 0, 0.04)',
-                          transition: 'all 0.15s ease',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          alignItems: 'center',
-                          gap: '0.3rem',
-                          minHeight: '90px'
-                        }}
-                      >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                          {isYesSelected && <CheckCircle2 size={18} color="#0d9488" />}
-                          <span>{currentLang === 'mr' ? 'होय' : currentLang === 'hi' ? 'हाँ' : 'YES'}</span>
-                        </div>
-                        <span
-                          style={{
-                            fontSize: '0.83rem',
-                            fontWeight: 700,
-                            color: isYesSelected ? '#0d9488' : '#64748b'
-                          }}
-                        >
-                          {isYesSelected
-                            ? (currentLang === 'mr' ? '✓ निवडले (मला हे लक्षण आहे)' : currentLang === 'hi' ? '✓ चयनित (मुझे यह लक्षण है)' : '✓ Selected (I have this symptom)')
-                            : (currentLang === 'mr' ? 'मला हे लक्षण आहे' : currentLang === 'hi' ? 'मुझे यह लक्षण है' : 'I have this symptom')}
-                        </span>
-                      </button>
-
-                      {/* NO BUTTON */}
-                      <button
-                        type="button"
-                        onClick={() => handleSelectAnswer(false)}
-                        aria-pressed={isNoSelected}
-                        style={{
-                          padding: '0.85rem 0.75rem',
-                          borderRadius: '10px',
-                          border: isNoSelected ? '2.5px solid #0284c7' : '1.5px solid #cbd5e1',
-                          background: isNoSelected ? '#f0f9ff' : '#ffffff',
-                          color: isNoSelected ? '#0369a1' : '#334155',
-                          fontSize: '1.2rem',
-                          fontWeight: 900,
-                          cursor: 'pointer',
-                          boxShadow: isNoSelected
-                            ? '0 0 0 3px rgba(2, 132, 199, 0.25), 0 4px 12px rgba(2, 132, 199, 0.15)'
-                            : '0 2px 8px rgba(0, 0, 0, 0.04)',
-                          transition: 'all 0.15s ease',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          alignItems: 'center',
-                          gap: '0.3rem',
-                          minHeight: '90px'
-                        }}
-                      >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                          {isNoSelected && <CheckCircle2 size={18} color="#0284c7" />}
-                          <span>{currentLang === 'mr' ? 'नाही' : currentLang === 'hi' ? 'नहीं' : 'NO'}</span>
-                        </div>
-                        <span
-                          style={{
-                            fontSize: '0.83rem',
-                            fontWeight: 700,
-                            color: isNoSelected ? '#0284c7' : '#64748b'
-                          }}
-                        >
-                          {isNoSelected
-                            ? (currentLang === 'mr' ? '✓ निवडले (मला हे लक्षण नाही)' : currentLang === 'hi' ? '✓ चयनित (मुझे यह लक्षण नहीं है)' : '✓ Selected (I do not have this)')
-                            : (currentLang === 'mr' ? 'मला हे लक्षण नाही' : currentLang === 'hi' ? 'मुझे यह लक्षण नहीं है' : 'I do not have this')}
-                        </span>
-                      </button>
-                    </div>
-
-                    {/* PROMINENT NEXT QUESTION / COMPLETE ASSESSMENT BUTTON */}
-                    <div style={{ marginBottom: '0.9rem', display: 'flex', justifyContent: 'center' }}>
-                      <button
-                        type="button"
-                        onClick={handleNext}
-                        disabled={!hasAnswer}
-                        aria-label={isLastQuestion ? 'Complete Assessment' : 'Next Question'}
-                        style={{
-                          width: '100%',
-                          maxWidth: '460px',
-                          padding: '0.75rem 1.5rem',
-                          borderRadius: '10px',
-                          border: 'none',
-                          background: hasAnswer
-                            ? (isLastQuestion
-                                ? 'linear-gradient(135deg, #059669 0%, #047857 100%)'
-                                : 'linear-gradient(135deg, #0d9488 0%, #0f766e 100%)')
-                            : '#e2e8f0',
-                          color: hasAnswer ? '#ffffff' : '#94a3b8',
-                          fontSize: '0.98rem',
-                          fontWeight: 800,
-                          cursor: hasAnswer ? 'pointer' : 'not-allowed',
-                          boxShadow: hasAnswer ? '0 4px 14px rgba(13, 148, 136, 0.35)' : 'none',
-                          transition: 'all 0.18s ease',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          gap: '0.5rem',
-                          minHeight: '44px'
-                        }}
-                      >
-                        <span>
-                          {isLastQuestion
-                            ? (currentLang === 'mr' ? 'तपासणी पूर्ण करा आणि शिफारस पहा' : currentLang === 'hi' ? 'मूल्यांकन पूर्ण करें और सिफारिश देखें' : 'Complete Assessment & View Recommendation')
-                            : (currentLang === 'mr' ? 'पुढील प्रश्न →' : currentLang === 'hi' ? 'अगला प्रश्न →' : 'Next Question →')}
-                        </span>
-                        <ArrowRight size={17} />
-                      </button>
-                    </div>
-
-                    {/* PREVIOUS QUESTION & HELPER HINT */}
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
-                      {currentIndex > 0 ? (
-                        <button
-                          type="button"
-                          onClick={handlePrevious}
-                          style={{
-                            background: '#ffffff',
-                            border: '1px solid #cbd5e1',
-                            color: '#475569',
-                            fontSize: '0.85rem',
-                            fontWeight: 700,
-                            cursor: 'pointer',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '0.4rem',
-                            padding: '0.55rem 0.9rem',
-                            borderRadius: '8px',
-                            boxShadow: '0 1px 2px rgba(0, 0, 0, 0.04)'
-                          }}
-                        >
-                          <ArrowLeft size={16} />
-                          <span>{currentLang === 'mr' ? 'मागील प्रश्न' : currentLang === 'hi' ? 'पिछला प्रश्न' : 'Previous Question'}</span>
-                        </button>
-                      ) : (
-                        <div />
-                      )}
-
-                      <span style={{ fontSize: '0.82rem', color: hasAnswer ? '#0d9488' : '#94a3b8', fontWeight: 600 }}>
-                        {hasAnswer
-                          ? (currentLang === 'mr' ? '✓ उत्तर निवडले — पुढे जाण्यासाठी पुढील बटण दाबा' : currentLang === 'hi' ? '✓ उत्तर चुना गया — आगे बढ़ने के लिए अगला बटन दबाएं' : '✓ Answer selected — Click Next to proceed')
-                          : (currentLang === 'mr' ? 'कृपया पुढे जाण्यासाठी होय किंवा नाही निवडा' : currentLang === 'hi' ? 'कृपया आगे बढ़ने के लिए हाँ या नहीं चुनें' : 'Please select YES or NO to continue')}
-                      </span>
-                    </div>
-                  </>
-                );
-              })()}
-            </div>
+            /* AI SYMPTOM CHATBOT: optional suggested symptom chips + free-text
+               chat input, sent to the real Gemini API. Replaces the old fixed
+               10-question Yes/No screening entirely. */
+            <SymptomChatAssessment currentLang={currentLang} onComplete={handleChatComplete} />
           ) : (
             /* FINAL CARE RECOMMENDATION RESULT SCREEN */
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
               {/* SECTION A: TRIAGE CARE LEVEL BADGE & RECOMMENDATION */}
               <div
                 style={{
-                  background: triageResult.badgeBg,
-                  border: `2px solid ${triageResult.badgeBorder}`,
+                  background: triageStyle.badgeBg,
+                  border: `2px solid ${triageStyle.badgeBorder}`,
                   borderRadius: '16px',
                   padding: '1.5rem',
-                  boxShadow: `0 6px 20px -2px ${triageResult.badgeColor}22`
+                  boxShadow: `0 6px 20px -2px ${triageStyle.badgeColor}22`
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.65rem', flexWrap: 'wrap', gap: '0.5rem' }}>
                   <span
                     style={{
-                      background: triageResult.badgeColor,
+                      background: triageStyle.badgeColor,
                       color: '#ffffff',
                       padding: '0.35rem 0.85rem',
                       borderRadius: '9999px',
@@ -757,8 +460,8 @@ export const SymptomAssessmentModal: React.FC<SymptomAssessmentModalProps> = ({
                       gap: '0.4rem'
                     }}
                   >
-                    <span>{triageResult.category === 'EMERGENCY' ? '⚠️' : triageResult.category === 'HIGHER_LEVEL' ? '🟠' : triageResult.category === 'PHC' ? '🟡' : '🟢'}</span>
-                    <span>{triageResult.title[currentLang]}</span>
+                    <span>{triageStyle.category === 'EMERGENCY' ? '⚠️' : triageStyle.category === 'HIGHER_LEVEL' ? '🟠' : triageStyle.category === 'PHC' ? '🟡' : '🟢'}</span>
+                    <span>{triageStyle.title[currentLang]}</span>
                   </span>
 
                   <span style={{ fontSize: '0.8rem', color: '#64748b', fontWeight: 700 }}>
@@ -767,16 +470,16 @@ export const SymptomAssessmentModal: React.FC<SymptomAssessmentModalProps> = ({
                 </div>
 
                 <h4 style={{ margin: '0 0 0.5rem 0', fontSize: '1.25rem', fontWeight: 800, color: '#0f172a', lineHeight: 1.35 }}>
-                  {triageResult.summary[currentLang]}
+                  {chatResult?.patient_message}
                 </h4>
 
                 <div style={{ fontSize: '0.92rem', color: '#334155', lineHeight: 1.5, marginTop: '0.5rem' }}>
                   <strong>{currentLang === 'mr' ? 'पुढील कृती: ' : currentLang === 'hi' ? 'अगला कदम: ' : 'Next Action: '}</strong>
-                  {triageResult.actionGuidance[currentLang]}
+                  {chatResult?.recommendation}
                 </div>
 
                 <div style={{ marginTop: '0.85rem', paddingTop: '0.75rem', borderTop: '1px solid rgba(0,0,0,0.08)', fontSize: '0.85rem', color: '#0f172a' }}>
-                  <strong>{currentLang === 'mr' ? 'योग्य काळजी स्तर:' : currentLang === 'hi' ? 'उपयुक्त देखभाल स्तर:' : 'Appropriate Care Tier:'}</strong> {triageResult.recommendedCareLevel[currentLang]}
+                  <strong>{currentLang === 'mr' ? 'योग्य काळजी स्तर:' : currentLang === 'hi' ? 'उपयुक्त देखभाल स्तर:' : 'Appropriate Care Tier:'}</strong> {triageStyle.recommendedCareLevel[currentLang]}
                 </div>
               </div>
 
@@ -986,27 +689,26 @@ export const SymptomAssessmentModal: React.FC<SymptomAssessmentModalProps> = ({
                 </div>
               </div>
 
-              {/* REPORTED SYMPTOMS SUMMARY TAGS */}
-              <div>
-                <div style={{ fontSize: '0.8rem', fontWeight: 800, textTransform: 'uppercase', color: '#64748b', letterSpacing: '0.04em', marginBottom: '0.4rem' }}>
-                  {currentLang === 'mr' ? 'नोंदवलेली प्रश्नावली उत्तरे:' : currentLang === 'hi' ? 'दर्ज प्रश्नावली उत्तर:' : 'Reported Questionnaire Answers:'}
-                </div>
-                <div
-                  style={{
-                    display: 'flex',
-                    flexWrap: 'wrap',
-                    gap: '0.45rem',
-                    background: '#f8fafc',
-                    padding: '0.75rem 1rem',
-                    borderRadius: '10px',
-                    border: '1px solid #e2e8f0'
-                  }}
-                >
-                  {TRIAGE_QUESTIONS.map((q) => {
-                    const reported = answers[q.id];
-                    return (
+              {/* SYMPTOMS IDENTIFIED BY THE AI ASSISTANT */}
+              {chatResult && chatResult.identified_symptoms.length > 0 && (
+                <div>
+                  <div style={{ fontSize: '0.8rem', fontWeight: 800, textTransform: 'uppercase', color: '#64748b', letterSpacing: '0.04em', marginBottom: '0.4rem' }}>
+                    {currentLang === 'mr' ? 'ओळखलेली लक्षणे:' : currentLang === 'hi' ? 'पहचाने गए लक्षण:' : 'Symptoms Identified:'}
+                  </div>
+                  <div
+                    style={{
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      gap: '0.45rem',
+                      background: '#f8fafc',
+                      padding: '0.75rem 1rem',
+                      borderRadius: '10px',
+                      border: '1px solid #e2e8f0'
+                    }}
+                  >
+                    {chatResult.identified_symptoms.map((s, idx) => (
                       <span
-                        key={q.id}
+                        key={idx}
                         style={{
                           display: 'inline-flex',
                           alignItems: 'center',
@@ -1015,20 +717,18 @@ export const SymptomAssessmentModal: React.FC<SymptomAssessmentModalProps> = ({
                           fontWeight: 700,
                           padding: '0.2rem 0.55rem',
                           borderRadius: '6px',
-                          background: reported ? (q.isEmergencyRedFlag ? '#fee2e2' : '#fef3c7') : '#f1f5f9',
-                          color: reported ? (q.isEmergencyRedFlag ? '#991b1b' : '#b45309') : '#64748b',
-                          border: reported ? (q.isEmergencyRedFlag ? '1px solid #fca5a5' : '1px solid #fde68a') : '1px solid #e2e8f0'
+                          background: chatResult.emergency_flag ? '#fee2e2' : '#fef3c7',
+                          color: chatResult.emergency_flag ? '#991b1b' : '#b45309',
+                          border: chatResult.emergency_flag ? '1px solid #fca5a5' : '1px solid #fde68a'
                         }}
                       >
-                        {reported ? <CheckCircle2 size={13} color={q.isEmergencyRedFlag ? '#dc2626' : '#d97706'} /> : <XCircle size={13} />}
-                        {(SYMPTOM_NAME_TRANSLATIONS[q.id]?.[currentLang]) || q.name}: {reported
-                          ? (currentLang === 'mr' ? 'होय' : currentLang === 'hi' ? 'हाँ' : 'YES')
-                          : (currentLang === 'mr' ? 'नाही' : currentLang === 'hi' ? 'नहीं' : 'NO')}
+                        <CheckCircle2 size={13} color={chatResult.emergency_flag ? '#dc2626' : '#d97706'} />
+                        {s}
                       </span>
-                    );
-                  })}
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           )}
         </div>

@@ -89,6 +89,7 @@ router.get('/analytics/state', analytics_controller_js_1.getStateAnalytics);
 // AI Decision Support Triage & Assistant
 router.post('/ai/triage', (0, asyncHandler_js_1.asyncHandler)(ai_controller_js_1.triageAssessment));
 router.post('/ai/assistant', ai_controller_js_1.healthAssistant);
+router.post('/ai/symptom-triage', (0, asyncHandler_js_1.asyncHandler)(ai_controller_js_1.geminiSymptomTriage));
 // Grievances & Feedback
 router.post('/grievances', (0, asyncHandler_js_1.asyncHandler)(grievance_controller_js_1.submitGrievance));
 router.get('/grievances', (0, asyncHandler_js_1.asyncHandler)(grievance_controller_js_1.getGrievances));

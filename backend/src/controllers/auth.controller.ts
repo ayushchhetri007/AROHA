@@ -173,9 +173,59 @@ export const login = async (req: Request, res: Response) => {
   }
 
   const idClean = String(identifier).trim().toLowerCase();
+  const staffRoles = ['asha_worker', 'doctor', 'hospital', 'admin'];
 
   let patientProfile = null;
   let user: any = null;
+
+  // Staff role login (ANM/ASHA, Doctor, Hospital Management, Admin): a
+  // dedicated, strictly-validated path used whenever the request targets one
+  // of these 4 roles. Requires a password, requires an exact known
+  // identifier (no substring/partial matching), and requires the
+  // identifier's actual role to match the requested role. There is no
+  // fallback to blind user lookup or auto-provisioning for these roles -
+  // this function always returns (success or 401) without falling through
+  // to the patient-login logic below.
+  if (requestedRole && staffRoles.includes(requestedRole)) {
+    const staffDemoMap: Record<string, { userId: string; role: string; demoId: string; facilityId?: string }> = {
+      'asha001': { userId: 'usr-asha-1', role: 'asha_worker', demoId: 'ASHA001' },
+      'doc001': { userId: 'usr-doc-1', role: 'doctor', demoId: 'DOC001' },
+      'admin001': { userId: 'usr-admin-1', role: 'admin', demoId: 'ADMIN001' },
+      'hosp001': { userId: 'usr-staff-1', role: 'hospital', demoId: 'HOSP001', facilityId: 'fac-dh-satara' }
+    };
+    const legacyEmailMap: Record<string, { userId: string; role: string; demoId?: string; facilityId?: string }> = {
+      'anm@demo.com': { userId: 'usr-asha-1', role: 'asha_worker' },
+      'doctor@demo.com': { userId: 'usr-doc-1', role: 'doctor' },
+      'hospital@demo.com': { userId: 'usr-staff-1', role: 'hospital', facilityId: 'fac-dh-satara' },
+      'admin@demo.com': { userId: 'usr-admin-1', role: 'admin' }
+    };
+
+    const match = staffDemoMap[idClean] || legacyEmailMap[idClean];
+    const validPassword = !!password && (password === 'Demo@123' || password === 'demo123');
+
+    if (!match || !validPassword || match.role !== requestedRole) {
+      return res.status(401).json({ error: 'Invalid User ID or Password' });
+    }
+
+    const staffUser = await db.prepare('SELECT * FROM users WHERE id = ?').get(match.userId) as any;
+    if (!staffUser) {
+      return res.status(401).json({ error: 'Invalid User ID or Password' });
+    }
+    staffUser.role = match.role;
+    if (match.demoId) staffUser.demo_id = match.demoId;
+    if (match.facilityId) staffUser.facility_id = match.facilityId;
+
+    return res.json({
+      message: 'Authentication successful',
+      token: `demo-token-${staffUser.id}`,
+      user: {
+        ...staffUser,
+        role: match.role,
+        facility_id: staffUser.facility_id || (match.role === 'hospital' ? 'fac-dh-satara' : null)
+      },
+      patientProfile: null
+    });
+  }
 
   // 1. Direct Patient ID or ABHA ID lookup (e.g. P-10452, P-10453, P-10454)
   if (idClean.startsWith('p-') || requestedRole === 'patient') {
@@ -198,28 +248,11 @@ export const login = async (req: Request, res: Response) => {
     }
   }
 
-  // 2. Direct Demo Account Shortcuts
+  // 2. Direct Demo Account Shortcut (Patient only - the 4 staff roles are
+  // fully handled by the dedicated, strictly-validated block above and never
+  // reach this point).
   if (!user) {
-    // Demo credentials for the 4 staff roles: ASHA001, DOC001, ADMIN001, HOSP001 (Password: Demo@123)
-    const staffDemoMap: Record<string, { userId: string; role: string; demoId: string; facilityId?: string }> = {
-      'asha001': { userId: 'usr-asha-1', role: 'asha_worker', demoId: 'ASHA001' },
-      'doc001': { userId: 'usr-doc-1', role: 'doctor', demoId: 'DOC001' },
-      'admin001': { userId: 'usr-admin-1', role: 'admin', demoId: 'ADMIN001' },
-      'hosp001': { userId: 'usr-staff-1', role: 'hospital', demoId: 'HOSP001', facilityId: 'fac-dh-satara' }
-    };
-
-    if (staffDemoMap[idClean]) {
-      if (password && password !== 'Demo@123' && password !== 'demo123') {
-        return res.status(401).json({ error: 'Invalid credentials. Password for demo accounts is Demo@123' });
-      }
-      const demoAccount = staffDemoMap[idClean];
-      user = await db.prepare('SELECT * FROM users WHERE id = ?').get(demoAccount.userId) as any;
-      if (user) {
-        user.role = demoAccount.role;
-        user.demo_id = demoAccount.demoId;
-        if (demoAccount.facilityId) user.facility_id = demoAccount.facilityId;
-      }
-    } else if (idClean === 'patient@demo.com') {
+    if (idClean === 'patient@demo.com') {
       const p10452 = await db.prepare('SELECT * FROM patients WHERE id = ?').get('P-10452') as any;
       if (p10452) {
         patientProfile = p10452;
@@ -228,27 +261,6 @@ export const login = async (req: Request, res: Response) => {
       if (!user) {
         user = await db.prepare('SELECT * FROM users WHERE id = ?').get('usr-patient-1');
       }
-    } else if (idClean === 'anm@demo.com' || (idClean.includes('anm') && requestedRole !== 'patient') || (idClean.includes('asha') && requestedRole !== 'patient')) {
-      if (password && password !== 'Demo@123' && password !== 'demo123') {
-        return res.status(401).json({ error: 'Invalid credentials. Password for demo accounts is Demo@123' });
-      }
-      user = await db.prepare('SELECT * FROM users WHERE id = ?').get('usr-asha-1');
-    } else if (idClean === 'doctor@demo.com' || (idClean.includes('doc') && requestedRole !== 'patient')) {
-      if (password && password !== 'Demo@123' && password !== 'demo123') {
-        return res.status(401).json({ error: 'Invalid credentials. Password for demo accounts is Demo@123' });
-      }
-      user = await db.prepare('SELECT * FROM users WHERE id = ?').get('usr-doc-1');
-    } else if (idClean === 'hospital@demo.com' || (idClean.includes('hosp') && requestedRole !== 'patient')) {
-      if (password && password !== 'Demo@123' && password !== 'demo123') {
-        return res.status(401).json({ error: 'Invalid credentials. Password for demo accounts is Demo@123' });
-      }
-      user = await db.prepare('SELECT * FROM users WHERE id = ?').get('usr-staff-1');
-      if (user) user.role = 'hospital';
-    } else if (idClean === 'admin@demo.com' || (idClean.includes('admin') && requestedRole !== 'patient')) {
-      if (password && password !== 'Demo@123' && password !== 'demo123') {
-        return res.status(401).json({ error: 'Invalid credentials. Password for demo accounts is Demo@123' });
-      }
-      user = await db.prepare('SELECT * FROM users WHERE id = ?').get('usr-admin-1');
     }
   }
 
