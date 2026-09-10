@@ -142,9 +142,12 @@ export const createAppointment = (req: AuthRequest, res: Response) => {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'confirmed', ?, ?)
     `).run(appointmentId, appointmentNumber, targetPatientId, facility_id, validDoctorId, service_name || 'General Medicine OPD', apptDate, apptSlot, priority || 'normal', reason || 'OPD Consultation');
 
+    // 'booked' = appointment token exists, but the patient has not yet checked
+    // into the live OPD queue - it must not appear in the Live Token Queue
+    // until an explicit check-in transitions it to 'waiting'.
     db.prepare(`
       INSERT INTO queue_tokens (id, token_number, appointment_id, facility_id, doctor_id, patient_id, status, estimated_wait_minutes, counter_room)
-      VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, 'booked', ?, ?)
     `).run(tokenId, nextTokenNum, appointmentId, facility_id, validDoctorId, targetPatientId, waitMinutes, room);
   })();
 

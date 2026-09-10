@@ -16,7 +16,7 @@ export const FacilityStaffDashboard: React.FC = () => {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const qRes = await api.getQueue('fac-phc-shirwal');
+      const qRes = await api.getQueue('fac-phc-shirwal', 'all');
       setQueue(qRes.tokens || []);
 
       const mRes = await api.searchMedicines('', 'Satara');
@@ -137,26 +137,37 @@ export const FacilityStaffDashboard: React.FC = () => {
                       borderRadius: '4px',
                       fontSize: '0.75rem',
                       fontWeight: 700,
-                      background: tok.status === 'in_progress' ? '#e0f2fe' : tok.status === 'completed' ? '#f1f5f9' : '#fef3c7',
-                      color: tok.status === 'in_progress' ? '#0369a1' : tok.status === 'completed' ? '#64748b' : '#b45309'
+                      background: tok.status === 'in_progress' ? '#e0f2fe' : tok.status === 'completed' ? '#f1f5f9' : tok.status === 'booked' ? '#f3e8ff' : '#fef3c7',
+                      color: tok.status === 'in_progress' ? '#0369a1' : tok.status === 'completed' ? '#64748b' : tok.status === 'booked' ? '#6d28d9' : '#b45309'
                     }}>
                       {tok.status.toUpperCase()}
                     </span>
                   </td>
                   <td style={{ padding: '0.75rem 1rem' }}>
                     <div style={{ display: 'flex', gap: '0.4rem' }}>
-                      <button
-                        onClick={() => handleUpdateToken(tok.id, 'in_progress')}
-                        style={{ padding: '0.25rem 0.5rem', borderRadius: '4px', border: '1px solid #0284c7', background: '#e0f2fe', color: '#0369a1', fontWeight: 600, fontSize: '0.75rem', cursor: 'pointer' }}
-                      >
-                        Call
-                      </button>
-                      <button
-                        onClick={() => handleUpdateToken(tok.id, 'completed')}
-                        style={{ padding: '0.25rem 0.5rem', borderRadius: '4px', border: '1px solid #16a34a', background: '#dcfce7', color: '#15803d', fontWeight: 600, fontSize: '0.75rem', cursor: 'pointer' }}
-                      >
-                        Complete
-                      </button>
+                      {tok.status === 'booked' ? (
+                        <button
+                          onClick={() => handleUpdateToken(tok.id, 'waiting')}
+                          style={{ padding: '0.25rem 0.5rem', borderRadius: '4px', border: '1px solid #7c3aed', background: '#f3e8ff', color: '#6d28d9', fontWeight: 600, fontSize: '0.75rem', cursor: 'pointer' }}
+                        >
+                          Check In
+                        </button>
+                      ) : (
+                        <>
+                          <button
+                            onClick={() => handleUpdateToken(tok.id, 'in_progress')}
+                            style={{ padding: '0.25rem 0.5rem', borderRadius: '4px', border: '1px solid #0284c7', background: '#e0f2fe', color: '#0369a1', fontWeight: 600, fontSize: '0.75rem', cursor: 'pointer' }}
+                          >
+                            Call
+                          </button>
+                          <button
+                            onClick={() => handleUpdateToken(tok.id, 'completed')}
+                            style={{ padding: '0.25rem 0.5rem', borderRadius: '4px', border: '1px solid #16a34a', background: '#dcfce7', color: '#15803d', fontWeight: 600, fontSize: '0.75rem', cursor: 'pointer' }}
+                          >
+                            Complete
+                          </button>
+                        </>
+                      )}
                     </div>
                   </td>
                 </tr>

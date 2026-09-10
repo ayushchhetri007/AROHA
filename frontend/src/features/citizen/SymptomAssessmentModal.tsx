@@ -44,6 +44,24 @@ function hasValidCoords(lat: unknown, lng: unknown): lat is number {
   );
 }
 
+// Display-only translations of each question's short category name, for the
+// "Reported Questionnaire Answers" summary tags. Kept local to this component
+// (rather than changing TRIAGE_QUESTIONS[].name in triageEngine.ts) since that
+// field is also sent to the backend as part of the assessment payload and
+// must stay a single, stable English string there.
+const SYMPTOM_NAME_TRANSLATIONS: Record<string, { en: string; hi: string; mr: string }> = {
+  fever: { en: 'Fever or Chills', hi: 'बुखार या ठंड लगना', mr: 'ताप किंवा थंडी' },
+  respiratory_mild: { en: 'Cough, Cold, or Sore Throat', hi: 'खांसी, जुकाम या गले में खराश', mr: 'खोकला, सर्दी किंवा घसा दुखणे' },
+  body_ache_fatigue: { en: 'Headache, Body Ache, or Fatigue', hi: 'सिरदर्द, बदन दर्द या थकान', mr: 'डोकेदुखी, अंगदुखी किंवा थकवा' },
+  gastro_mild: { en: 'Stomach Pain, Diarrhea, or Nausea', hi: 'पेट दर्द, दस्त या मतली', mr: 'पोटदुखी, जुलाब किंवा मळमळ' },
+  duration_persistent: { en: 'Symptoms Lasting More Than 3-5 Days', hi: '3-5 दिनों से अधिक समय तक लक्षण', mr: '३-५ दिवसांपेक्षा जास्त काळ लक्षणे' },
+  chronic_condition: { en: 'Chronic Condition or Pregnancy', hi: 'पुरानी बीमारी या गर्भावस्था', mr: 'जुनाट आजार किंवा गर्भधारणा' },
+  chest_pain: { en: 'Severe Chest Pain or Pressure', hi: 'गंभीर सीने में दर्द या दबाव', mr: 'तीव्र छातीत दुखणे किंवा दाब' },
+  breathing_distress: { en: 'Severe Difficulty Breathing', hi: 'सांस लेने में गंभीर कठिनाई', mr: 'श्वास घेण्यास तीव्र त्रास' },
+  fainting_seizure: { en: 'Unconsciousness, Fainting, or Seizures', hi: 'बेहोशी, मूर्च्छा या दौरे', mr: 'बेशुद्धी, चक्कर येणे किंवा झटके' },
+  bleeding_paralysis: { en: 'Severe Bleeding or Sudden Paralysis', hi: 'गंभीर रक्तस्राव या अचानक लकवा', mr: 'तीव्र रक्तस्राव किंवा अचानक अर्धांगवायू' }
+};
+
 interface SymptomAssessmentModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -379,15 +397,23 @@ export const SymptomAssessmentModal: React.FC<SymptomAssessmentModalProps> = ({
                       ? 'स्वास्थ्य जांच परिणाम एवं मार्गदर्शन'
                       : 'Your Health Assessment Result')
                   : (currentLang === 'mr'
-                      ? 'लक्षणे तपासा (Check Your Symptoms)'
+                      ? 'सर्वसाधारण लक्षण तपासणी'
                       : currentLang === 'hi'
-                      ? 'लक्षणों की जांच करें (Check Your Symptoms)'
-                      : 'Check Your Symptoms')}
+                      ? 'सामान्य लक्षण जांच'
+                      : 'General Symptom Check')}
               </h3>
               <div style={{ fontSize: '0.76rem', color: '#ccfbf1', marginTop: '0.1rem' }}>
                 {isCompleted
-                  ? 'Preliminary Care Recommendation & Nearest Public Facility'
-                  : 'Stepped Digital Triage & Public Healthcare Guidance'}
+                  ? (currentLang === 'mr'
+                      ? 'प्राथमिक काळजी शिफारस व जवळचे सार्वजनिक आरोग्य केंद्र'
+                      : currentLang === 'hi'
+                      ? 'प्रारंभिक देखभाल सिफारिश एवं निकटतम सार्वजनिक स्वास्थ्य केंद्र'
+                      : 'Preliminary Care Recommendation & Nearest Public Facility')
+                  : (currentLang === 'mr'
+                      ? 'टप्प्याटप्प्याने डिजिटल त्रिआज व सार्वजनिक आरोग्य मार्गदर्शन'
+                      : currentLang === 'hi'
+                      ? 'चरणबद्ध डिजिटल ट्राइएज एवं सार्वजनिक स्वास्थ्य मार्गदर्शन'
+                      : 'Stepped Digital Triage & Public Healthcare Guidance')}
               </div>
             </div>
           </div>
@@ -451,9 +477,12 @@ export const SymptomAssessmentModal: React.FC<SymptomAssessmentModalProps> = ({
               <div style={{ marginBottom: '1rem' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem', fontSize: '0.8rem', fontWeight: 600, color: '#475569' }}>
                   <span>
-                    Question <strong>{currentIndex + 1}</strong> of {TRIAGE_QUESTIONS.length}
+                    {currentLang === 'mr' ? 'प्रश्न' : currentLang === 'hi' ? 'प्रश्न' : 'Question'} <strong>{currentIndex + 1}</strong>{' '}
+                    {currentLang === 'mr' ? 'पैकी' : currentLang === 'hi' ? 'में से' : 'of'} {TRIAGE_QUESTIONS.length}
                   </span>
-                  <span style={{ color: '#0d9488', fontWeight: 800 }}>{progressPercent}% Completed</span>
+                  <span style={{ color: '#0d9488', fontWeight: 800 }}>
+                    {progressPercent}{currentLang === 'mr' ? '% पूर्ण' : currentLang === 'hi' ? '% पूर्ण' : '% Completed'}
+                  </span>
                 </div>
                 <div style={{ width: '100%', height: '7px', background: '#e2e8f0', borderRadius: '9999px', overflow: 'hidden' }}>
                   <div
@@ -480,34 +509,27 @@ export const SymptomAssessmentModal: React.FC<SymptomAssessmentModalProps> = ({
                   marginBottom: '1.15rem'
                 }}
               >
-                <div
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '0.3rem',
-                    fontSize: '0.7rem',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.07em',
-                    color: currentQuestion.isEmergencyRedFlag ? '#c2410c' : '#0d9488',
-                    fontWeight: 800,
-                    marginBottom: '0.5rem',
-                    background: currentQuestion.isEmergencyRedFlag ? '#ffedd5' : '#ccfbf1',
-                    padding: '0.15rem 0.55rem',
-                    borderRadius: '9999px'
-                  }}
-                >
-                  {currentQuestion.isEmergencyRedFlag ? (
-                    <>
-                      <AlertTriangle size={12} />
-                      <span>Acute Red-Flag Screening</span>
-                    </>
-                  ) : (
-                    <>
-                      <Activity size={12} />
-                      <span>General Symptom Check</span>
-                    </>
-                  )}
-                </div>
+                {currentQuestion.isEmergencyRedFlag && (
+                  <div
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.3rem',
+                      fontSize: '0.7rem',
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.07em',
+                      color: '#c2410c',
+                      fontWeight: 800,
+                      marginBottom: '0.5rem',
+                      background: '#ffedd5',
+                      padding: '0.15rem 0.55rem',
+                      borderRadius: '9999px'
+                    }}
+                  >
+                    <AlertTriangle size={12} />
+                    <span>{currentLang === 'mr' ? 'तीव्र धोक्याची तपासणी' : currentLang === 'hi' ? 'गंभीर जोखिम जांच' : 'Acute Red-Flag Screening'}</span>
+                  </div>
+                )}
 
                 <h4
                   style={{
@@ -521,16 +543,10 @@ export const SymptomAssessmentModal: React.FC<SymptomAssessmentModalProps> = ({
                   {currentQuestion.questionText[currentLang]}
                 </h4>
 
-                {/* Subtext / Vernacular Context */}
+                {/* Supporting description, in the user's selected language only */}
                 <div style={{ fontSize: '0.95rem', color: '#64748b', fontWeight: 500 }}>
                   {currentQuestion.subText[currentLang]}
                 </div>
-
-                {currentLang !== 'mr' && (
-                  <div style={{ fontSize: '0.9rem', color: '#94a3b8', marginTop: '0.4rem', fontStyle: 'italic' }}>
-                    {currentQuestion.questionText.mr}
-                  </div>
-                )}
               </div>
 
               {/* YES / NO BUTTONS */}
@@ -577,7 +593,7 @@ export const SymptomAssessmentModal: React.FC<SymptomAssessmentModalProps> = ({
                       >
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                           {isYesSelected && <CheckCircle2 size={18} color="#0d9488" />}
-                          <span>YES / हाँ / होय</span>
+                          <span>{currentLang === 'mr' ? 'होय' : currentLang === 'hi' ? 'हाँ' : 'YES'}</span>
                         </div>
                         <span
                           style={{
@@ -587,8 +603,8 @@ export const SymptomAssessmentModal: React.FC<SymptomAssessmentModalProps> = ({
                           }}
                         >
                           {isYesSelected
-                            ? (currentLang === 'mr' ? '✓ निवडले (मला हे लक्षण आहे)' : '✓ Selected (I have this symptom)')
-                            : (currentLang === 'mr' ? 'मला हे लक्षण आहे' : 'I have this symptom')}
+                            ? (currentLang === 'mr' ? '✓ निवडले (मला हे लक्षण आहे)' : currentLang === 'hi' ? '✓ चयनित (मुझे यह लक्षण है)' : '✓ Selected (I have this symptom)')
+                            : (currentLang === 'mr' ? 'मला हे लक्षण आहे' : currentLang === 'hi' ? 'मुझे यह लक्षण है' : 'I have this symptom')}
                         </span>
                       </button>
 
@@ -619,7 +635,7 @@ export const SymptomAssessmentModal: React.FC<SymptomAssessmentModalProps> = ({
                       >
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                           {isNoSelected && <CheckCircle2 size={18} color="#0284c7" />}
-                          <span>NO / नहीं / नाही</span>
+                          <span>{currentLang === 'mr' ? 'नाही' : currentLang === 'hi' ? 'नहीं' : 'NO'}</span>
                         </div>
                         <span
                           style={{
@@ -629,8 +645,8 @@ export const SymptomAssessmentModal: React.FC<SymptomAssessmentModalProps> = ({
                           }}
                         >
                           {isNoSelected
-                            ? (currentLang === 'mr' ? '✓ निवडले (मला हे लक्षण नाही)' : '✓ Selected (I do not have this)')
-                            : (currentLang === 'mr' ? 'मला हे लक्षण नाही' : 'I do not have this')}
+                            ? (currentLang === 'mr' ? '✓ निवडले (मला हे लक्षण नाही)' : currentLang === 'hi' ? '✓ चयनित (मुझे यह लक्षण नहीं है)' : '✓ Selected (I do not have this)')
+                            : (currentLang === 'mr' ? 'मला हे लक्षण नाही' : currentLang === 'hi' ? 'मुझे यह लक्षण नहीं है' : 'I do not have this')}
                         </span>
                       </button>
                     </div>
@@ -668,8 +684,8 @@ export const SymptomAssessmentModal: React.FC<SymptomAssessmentModalProps> = ({
                       >
                         <span>
                           {isLastQuestion
-                            ? (currentLang === 'mr' ? 'तपासणी पूर्ण करा (Get Care Recommendation)' : 'Complete Assessment & View Recommendation')
-                            : (currentLang === 'mr' ? 'पुढील प्रश्न →' : 'Next Question →')}
+                            ? (currentLang === 'mr' ? 'तपासणी पूर्ण करा आणि शिफारस पहा' : currentLang === 'hi' ? 'मूल्यांकन पूर्ण करें और सिफारिश देखें' : 'Complete Assessment & View Recommendation')
+                            : (currentLang === 'mr' ? 'पुढील प्रश्न →' : currentLang === 'hi' ? 'अगला प्रश्न →' : 'Next Question →')}
                         </span>
                         <ArrowRight size={17} />
                       </button>
@@ -682,21 +698,22 @@ export const SymptomAssessmentModal: React.FC<SymptomAssessmentModalProps> = ({
                           type="button"
                           onClick={handlePrevious}
                           style={{
-                            background: 'transparent',
-                            border: 'none',
+                            background: '#ffffff',
+                            border: '1px solid #cbd5e1',
                             color: '#475569',
-                            fontSize: '0.9rem',
+                            fontSize: '0.85rem',
                             fontWeight: 700,
                             cursor: 'pointer',
                             display: 'inline-flex',
                             alignItems: 'center',
                             gap: '0.4rem',
-                            padding: '0.4rem 0.6rem',
-                            borderRadius: '6px'
+                            padding: '0.55rem 0.9rem',
+                            borderRadius: '8px',
+                            boxShadow: '0 1px 2px rgba(0, 0, 0, 0.04)'
                           }}
                         >
                           <ArrowLeft size={16} />
-                          <span>{currentLang === 'mr' ? 'मागील प्रश्न' : 'Previous Question'}</span>
+                          <span>{currentLang === 'mr' ? 'मागील प्रश्न' : currentLang === 'hi' ? 'पिछला प्रश्न' : 'Previous Question'}</span>
                         </button>
                       ) : (
                         <div />
@@ -704,8 +721,8 @@ export const SymptomAssessmentModal: React.FC<SymptomAssessmentModalProps> = ({
 
                       <span style={{ fontSize: '0.82rem', color: hasAnswer ? '#0d9488' : '#94a3b8', fontWeight: 600 }}>
                         {hasAnswer
-                          ? (currentLang === 'mr' ? '✓ उत्तर निवडले — पुढे जाण्यासाठी पुढील बटण दाबा' : '✓ Answer selected — Click Next to proceed')
-                          : (currentLang === 'mr' ? 'कृपया पुढे जाण्यासाठी होय किंवा नाही निवडा' : 'Please select YES or NO to continue')}
+                          ? (currentLang === 'mr' ? '✓ उत्तर निवडले — पुढे जाण्यासाठी पुढील बटण दाबा' : currentLang === 'hi' ? '✓ उत्तर चुना गया — आगे बढ़ने के लिए अगला बटन दबाएं' : '✓ Answer selected — Click Next to proceed')
+                          : (currentLang === 'mr' ? 'कृपया पुढे जाण्यासाठी होय किंवा नाही निवडा' : currentLang === 'hi' ? 'कृपया आगे बढ़ने के लिए हाँ या नहीं चुनें' : 'Please select YES or NO to continue')}
                       </span>
                     </div>
                   </>
@@ -745,7 +762,7 @@ export const SymptomAssessmentModal: React.FC<SymptomAssessmentModalProps> = ({
                   </span>
 
                   <span style={{ fontSize: '0.8rem', color: '#64748b', fontWeight: 700 }}>
-                    Digital Care Level Guidance
+                    {currentLang === 'mr' ? 'डिजिटल काळजी स्तर मार्गदर्शन' : currentLang === 'hi' ? 'डिजिटल देखभाल स्तर मार्गदर्शन' : 'Digital Care Level Guidance'}
                   </span>
                 </div>
 
@@ -754,19 +771,19 @@ export const SymptomAssessmentModal: React.FC<SymptomAssessmentModalProps> = ({
                 </h4>
 
                 <div style={{ fontSize: '0.92rem', color: '#334155', lineHeight: 1.5, marginTop: '0.5rem' }}>
-                  <strong>Next Action: </strong>
+                  <strong>{currentLang === 'mr' ? 'पुढील कृती: ' : currentLang === 'hi' ? 'अगला कदम: ' : 'Next Action: '}</strong>
                   {triageResult.actionGuidance[currentLang]}
                 </div>
 
                 <div style={{ marginTop: '0.85rem', paddingTop: '0.75rem', borderTop: '1px solid rgba(0,0,0,0.08)', fontSize: '0.85rem', color: '#0f172a' }}>
-                  <strong>Appropriate Care Tier:</strong> {triageResult.recommendedCareLevel[currentLang]}
+                  <strong>{currentLang === 'mr' ? 'योग्य काळजी स्तर:' : currentLang === 'hi' ? 'उपयुक्त देखभाल स्तर:' : 'Appropriate Care Tier:'}</strong> {triageResult.recommendedCareLevel[currentLang]}
                 </div>
               </div>
 
               {/* SECTION B: RECOMMENDED PUBLIC HEALTH FACILITY */}
               <div>
                 <div style={{ fontSize: '0.84rem', fontWeight: 800, textTransform: 'uppercase', color: '#475569', letterSpacing: '0.05em', marginBottom: '0.6rem' }}>
-                  {currentLang === 'mr' ? 'शिफारस केलेले शासकीय रुग्णालय / केंद्र:' : 'Recommended Public Healthcare Facility:'}
+                  {currentLang === 'mr' ? 'शिफारस केलेले शासकीय रुग्णालय / केंद्र:' : currentLang === 'hi' ? 'अनुशंसित सार्वजनिक स्वास्थ्य केंद्र:' : 'Recommended Public Healthcare Facility:'}
                 </div>
 
                 <div
@@ -819,7 +836,7 @@ export const SymptomAssessmentModal: React.FC<SymptomAssessmentModalProps> = ({
                       lineHeight: 1.45
                     }}
                   >
-                    <strong>Why this facility: </strong>
+                    <strong>{currentLang === 'mr' ? 'हे केंद्र योग्य का: ' : currentLang === 'hi' ? 'यह केंद्र क्यों उपयुक्त है: ' : 'Why this facility: '}</strong>
                     {matchedFacilityInfo.reason[currentLang]}
                   </div>
 
@@ -841,7 +858,7 @@ export const SymptomAssessmentModal: React.FC<SymptomAssessmentModalProps> = ({
                       <Stethoscope size={20} color="#16a34a" />
                       <div>
                         <div style={{ fontSize: '0.76rem', textTransform: 'uppercase', fontWeight: 800, color: '#15803d', letterSpacing: '0.04em' }}>
-                          Doctor Available Today
+                          {currentLang === 'mr' ? 'आज उपलब्ध डॉक्टर' : currentLang === 'hi' ? 'आज उपलब्ध डॉक्टर' : 'Doctor Available Today'}
                         </div>
                         <div style={{ fontSize: '0.95rem', fontWeight: 800, color: '#0f172a' }}>
                           {primaryDoctor.full_name}
@@ -853,7 +870,7 @@ export const SymptomAssessmentModal: React.FC<SymptomAssessmentModalProps> = ({
                     </div>
 
                     <span style={{ background: '#dcfce7', color: '#166534', fontSize: '0.75rem', fontWeight: 800, padding: '0.25rem 0.6rem', borderRadius: '9999px' }}>
-                      ✓ On Duty Now
+                      {currentLang === 'mr' ? '✓ सध्या कर्तव्यावर' : currentLang === 'hi' ? '✓ अभी उपस्थित' : '✓ On Duty Now'}
                     </span>
                   </div>
 
@@ -880,7 +897,7 @@ export const SymptomAssessmentModal: React.FC<SymptomAssessmentModalProps> = ({
                       }}
                     >
                       <Navigation size={17} />
-                      <span>Get Directions</span>
+                      <span>{currentLang === 'mr' ? 'दिशा मिळवा' : currentLang === 'hi' ? 'दिशा प्राप्त करें' : 'Get Directions'}</span>
                     </button>
 
                     {/* CALL FACILITY */}
@@ -907,7 +924,7 @@ export const SymptomAssessmentModal: React.FC<SymptomAssessmentModalProps> = ({
                       }}
                     >
                       <PhoneCall size={17} />
-                      <span>Call Facility</span>
+                      <span>{currentLang === 'mr' ? 'केंद्राला कॉल करा' : currentLang === 'hi' ? 'केंद्र को कॉल करें' : 'Call Facility'}</span>
                     </button>
 
                     {/* VIEW FACILITY DETAILS */}
@@ -930,7 +947,7 @@ export const SymptomAssessmentModal: React.FC<SymptomAssessmentModalProps> = ({
                       }}
                     >
                       <Building2 size={17} />
-                      <span>View Details</span>
+                      <span>{currentLang === 'mr' ? 'तपशील पहा' : currentLang === 'hi' ? 'विवरण देखें' : 'View Details'}</span>
                     </button>
 
                     {/* BOOK OPD / GET TOKEN */}
@@ -963,7 +980,7 @@ export const SymptomAssessmentModal: React.FC<SymptomAssessmentModalProps> = ({
                       }}
                     >
                       <Calendar size={17} />
-                      <span>Book OPD / Token</span>
+                      <span>{currentLang === 'mr' ? 'ओपीडी/टोकन बुक करा' : currentLang === 'hi' ? 'ओपीडी/टोकन बुक करें' : 'Book OPD / Token'}</span>
                     </button>
                   </div>
                 </div>
@@ -972,7 +989,7 @@ export const SymptomAssessmentModal: React.FC<SymptomAssessmentModalProps> = ({
               {/* REPORTED SYMPTOMS SUMMARY TAGS */}
               <div>
                 <div style={{ fontSize: '0.8rem', fontWeight: 800, textTransform: 'uppercase', color: '#64748b', letterSpacing: '0.04em', marginBottom: '0.4rem' }}>
-                  Reported Questionnaire Answers:
+                  {currentLang === 'mr' ? 'नोंदवलेली प्रश्नावली उत्तरे:' : currentLang === 'hi' ? 'दर्ज प्रश्नावली उत्तर:' : 'Reported Questionnaire Answers:'}
                 </div>
                 <div
                   style={{
@@ -1004,7 +1021,9 @@ export const SymptomAssessmentModal: React.FC<SymptomAssessmentModalProps> = ({
                         }}
                       >
                         {reported ? <CheckCircle2 size={13} color={q.isEmergencyRedFlag ? '#dc2626' : '#d97706'} /> : <XCircle size={13} />}
-                        {q.name}: {reported ? 'YES' : 'NO'}
+                        {(SYMPTOM_NAME_TRANSLATIONS[q.id]?.[currentLang]) || q.name}: {reported
+                          ? (currentLang === 'mr' ? 'होय' : currentLang === 'hi' ? 'हाँ' : 'YES')
+                          : (currentLang === 'mr' ? 'नाही' : currentLang === 'hi' ? 'नहीं' : 'NO')}
                       </span>
                     );
                   })}
@@ -1021,16 +1040,12 @@ export const SymptomAssessmentModal: React.FC<SymptomAssessmentModalProps> = ({
             borderTop: '1px solid #e2e8f0',
             padding: '0.6rem 1.25rem',
             display: 'flex',
-            justifyContent: 'space-between',
+            justifyContent: 'flex-end',
             alignItems: 'center',
             fontSize: '0.78rem',
             color: '#64748b'
           }}
         >
-          <span>
-            Patient: <strong>{patientProfile?.full_name || 'Rahul Kumar'}</strong> (ID: {patientProfile?.id || 'P-10452'})
-          </span>
-
           <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center' }}>
             {isCompleted && (
               <button
@@ -1051,7 +1066,7 @@ export const SymptomAssessmentModal: React.FC<SymptomAssessmentModalProps> = ({
                 }}
               >
                 <RotateCcw size={13} />
-                <span>Retake Assessment</span>
+                <span>{currentLang === 'mr' ? 'पुन्हा तपासणी करा' : currentLang === 'hi' ? 'पुनः मूल्यांकन करें' : 'Retake Assessment'}</span>
               </button>
             )}
 
@@ -1069,7 +1084,9 @@ export const SymptomAssessmentModal: React.FC<SymptomAssessmentModalProps> = ({
                 cursor: 'pointer'
               }}
             >
-              {isCompleted ? 'Done / Return to Dashboard' : 'Close'}
+              {isCompleted
+                ? (currentLang === 'mr' ? 'पूर्ण / डॅशबोर्डवर परत जा' : currentLang === 'hi' ? 'पूर्ण / डैशबोर्ड पर वापस जाएं' : 'Done / Return to Dashboard')
+                : (currentLang === 'mr' ? 'बंद करा' : currentLang === 'hi' ? 'बंद करें' : 'Close')}
             </button>
           </div>
         </div>

@@ -146,8 +146,9 @@ class ApiClient {
     });
   }
 
-  getQueue(facilityId: string = 'fac-phc-shirwal') {
-    return this.request<any>(`/queues?facility_id=${facilityId}`);
+  getQueue(facilityId: string = 'fac-phc-shirwal', scope?: 'all') {
+    const scopeParam = scope ? `&scope=${scope}` : '';
+    return this.request<any>(`/queues?facility_id=${facilityId}${scopeParam}`);
   }
 
   callNextToken(facilityId: string = 'fac-phc-shirwal') {

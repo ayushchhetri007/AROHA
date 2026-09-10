@@ -361,10 +361,33 @@ export const FacilityDirectory: React.FC<FacilityDirectoryProps> = ({ onOpenBook
               <div style={{ fontSize: '0.95rem', fontWeight: 800, color: '#0f172a' }}>
                 {t.facilitiesMap}
               </div>
-              <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center', fontSize: '0.78rem', color: '#64748b' }}>
+              <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', fontSize: '0.78rem', color: '#64748b' }}>
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
                   <MapPin size={13} color="#0d9488" /> {facilities.length} {t.facilitiesShown}
                 </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setViewMode('list');
+                    setFocusedFacilityId(null);
+                  }}
+                  aria-label="Close map"
+                  title="Close map"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: '28px',
+                    height: '28px',
+                    borderRadius: '6px',
+                    border: '1px solid #cbd5e1',
+                    background: '#ffffff',
+                    color: '#475569',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <X size={15} />
+                </button>
               </div>
             </div>
 

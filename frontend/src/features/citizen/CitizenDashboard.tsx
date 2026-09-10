@@ -538,7 +538,11 @@ export const CitizenDashboard: React.FC<{
               <h4 style={{ fontSize: '1.2rem', fontWeight: 800, color: '#0f172a', margin: '0 0 0.45rem 0' }}>
                 {t.liveQueueCardTitle}
               </h4>
-              {upcomingAppointments.length > 0 ? (
+              {/* An appointment token alone does not mean the patient is in
+                  the live queue - queue_status is 'booked' until the patient
+                  explicitly checks in. Only a genuine live-queue status
+                  should surface a token summary here. */}
+              {upcomingAppointments.length > 0 && upcomingAppointments[0].queue_status && upcomingAppointments[0].queue_status !== 'booked' ? (
                 <div style={{ background: '#faf5ff', border: '1px solid #ddd6fe', borderRadius: '10px', padding: '0.75rem 0.9rem', marginTop: '0.5rem' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
                     <span style={{ fontSize: '0.92rem', fontWeight: 800, color: '#7c3aed' }}>
@@ -563,7 +567,7 @@ export const CitizenDashboard: React.FC<{
             </div>
             <div style={{ marginTop: '1.5rem', paddingTop: '0.75rem', borderTop: '1px solid #f1f5f9' }}>
               <div className="card-action-btn" style={{ color: '#7c3aed' }}>
-                <span>{upcomingAppointments.length > 0 ? (t.trackLiveQueue || t.openLiveTracker) : t.openLiveTracker}</span>
+                <span>{upcomingAppointments.length > 0 && upcomingAppointments[0].queue_status && upcomingAppointments[0].queue_status !== 'booked' ? (t.trackLiveQueue || t.openLiveTracker) : t.openLiveTracker}</span>
                 <ArrowRight size={17} />
               </div>
             </div>

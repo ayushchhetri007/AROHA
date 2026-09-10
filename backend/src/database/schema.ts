@@ -110,6 +110,10 @@ export function initializeDatabase() {
       FOREIGN KEY (facility_id) REFERENCES facilities(id) ON DELETE CASCADE
     );
 
+    -- status lifecycle: 'booked' (appointment token exists; not yet in the
+    -- live OPD queue - excluded from GET /queues by default) -> 'waiting'
+    -- (explicitly checked into the live queue, via PATCH /queues/tokens/:id)
+    -- -> 'called' / 'in_progress' -> 'completed' (or 'cancelled' any time).
     CREATE TABLE IF NOT EXISTS queue_tokens (
       id TEXT PRIMARY KEY,
       token_number INTEGER NOT NULL,

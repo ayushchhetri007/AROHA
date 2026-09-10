@@ -203,6 +203,22 @@ export const TRIAGE_QUESTIONS: TriageQuestion[] = [
   }
 ];
 
+// Short, patient-friendly (non-diagnostic) names for each question, used to
+// build plain-language "you reported ..." summaries after an assessment
+// completes - in the user's selected language, from their actual answers.
+export const SYMPTOM_SUMMARY_NAMES: Record<string, { en: string; hi: string; mr: string }> = {
+  fever: { en: 'fever or chills', hi: 'बुखार या ठंड लगना', mr: 'ताप किंवा थंडी' },
+  respiratory_mild: { en: 'a cough, cold, or sore throat', hi: 'खांसी, जुकाम या गले में खराश', mr: 'खोकला, सर्दी किंवा घसा दुखणे' },
+  body_ache_fatigue: { en: 'headache, body ache, or fatigue', hi: 'सिरदर्द, बदन दर्द या थकान', mr: 'डोकेदुखी, अंगदुखी किंवा थकवा' },
+  gastro_mild: { en: 'stomach pain, diarrhea, or nausea', hi: 'पेट दर्द, दस्त या मतली', mr: 'पोटदुखी, जुलाब किंवा मळमळ' },
+  duration_persistent: { en: 'symptoms lasting more than 3-5 days', hi: '3-5 दिनों से अधिक समय तक लक्षण', mr: '३-५ दिवसांपेक्षा जास्त काळ लक्षणे' },
+  chronic_condition: { en: 'a chronic condition or pregnancy', hi: 'पुरानी बीमारी या गर्भावस्था', mr: 'जुनाट आजार किंवा गर्भधारणा' },
+  chest_pain: { en: 'severe chest pain or pressure', hi: 'गंभीर सीने में दर्द या दबाव', mr: 'तीव्र छातीत दुखणे किंवा दाब' },
+  breathing_distress: { en: 'severe difficulty breathing', hi: 'सांस लेने में गंभीर कठिनाई', mr: 'श्वास घेण्यास तीव्र त्रास' },
+  fainting_seizure: { en: 'unconsciousness, fainting, or seizures', hi: 'बेहोशी, मूर्च्छा या दौरे', mr: 'बेशुद्धी, चक्कर येणे किंवा झटके' },
+  bleeding_paralysis: { en: 'severe bleeding or sudden paralysis', hi: 'गंभीर रक्तस्राव या अचानक लकवा', mr: 'तीव्र रक्तस्राव किंवा अचानक अर्धांगवायू' }
+};
+
 export interface TriageResult {
   category: TriageLevel;
   badgeColor: string;

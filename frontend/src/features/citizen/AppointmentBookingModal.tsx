@@ -6,7 +6,33 @@ import {
   Ticket, MapPin, Activity, FileText, ShieldAlert, PhoneCall, Clock,
   AlertTriangle, Building2, Check, Navigation, AlertCircle, RotateCcw
 } from 'lucide-react';
-import { TRIAGE_QUESTIONS, evaluateTriage, TriageQuestion, TriageResult } from './triageEngine';
+import { TRIAGE_QUESTIONS, evaluateTriage, TriageQuestion, TriageResult, SYMPTOM_SUMMARY_NAMES } from './triageEngine';
+
+// Builds a brief, patient-friendly (non-diagnostic) sentence from the
+// question IDs the patient answered YES to, in the given language. Never
+// invents or asserts a disease/diagnosis - purely reflects reported answers.
+function buildSymptomSummarySentence(reportedIds: string[], lang: 'en' | 'hi' | 'mr'): string {
+  const reportedNames = reportedIds.map((id) => SYMPTOM_SUMMARY_NAMES[id]?.[lang] || SYMPTOM_SUMMARY_NAMES[id]?.en || id);
+
+  if (reportedNames.length === 0) {
+    return lang === 'mr'
+      ? 'या तपासणीमध्ये समाविष्ट असलेली कोणतीही लक्षणे तुम्ही नोंदवली नाहीत.'
+      : lang === 'hi'
+      ? 'आपने इस मूल्यांकन में शामिल किसी भी लक्षण की सूचना नहीं दी।'
+      : 'You did not report any of the symptoms covered in this assessment.';
+  }
+
+  const and = lang === 'mr' ? 'आणि' : lang === 'hi' ? 'और' : 'and';
+  const joined = reportedNames.length === 1
+    ? reportedNames[0]
+    : `${reportedNames.slice(0, -1).join(', ')} ${and} ${reportedNames[reportedNames.length - 1]}`;
+
+  return lang === 'mr'
+    ? `तुमच्या उत्तरांनुसार, तुम्ही ${joined} नोंदवले आहे.`
+    : lang === 'hi'
+    ? `आपके उत्तरों के अनुसार, आपने ${joined} की सूचना दी है।`
+    : `Based on your responses, you reported ${joined}.`;
+}
 
 export const AppointmentBookingModal: React.FC<{
   isOpen: boolean;
@@ -46,6 +72,9 @@ export const AppointmentBookingModal: React.FC<{
     badgeColor: '#b45309',
     badgeBg: '#fef3c7'
   });
+  // Brief, patient-friendly, non-diagnostic recap of the completed
+  // assessment's actual YES answers, in the selected language.
+  const [symptomSummarySentence, setSymptomSummarySentence] = useState<string>('');
 
   // Facility & Appointment state
   const [facilityId, setFacilityId] = useState<string>(defaultFacilityId || 'fac-phc-shirwal');
@@ -145,18 +174,30 @@ export const AppointmentBookingModal: React.FC<{
           const tLevel = (validAssessment.triage_level || 'PHC').toUpperCase();
           const isEmergency = validAssessment.emergency_flag === 1 || tLevel === 'EMERGENCY';
 
+          // A historical/stale assessment must never automatically trigger
+          // emergency escalation or interrupt a fresh Book OPD session - only
+          // a red flag answered live, in a completed assessment taken during
+          // THIS booking session, should ever route to the emergency screen
+          // (see handleTriageNext). A past emergency-flagged assessment is
+          // therefore treated the same as "no usable assessment" here: the
+          // user lands on Step 1 and explicitly chooses how to proceed.
+          if (isEmergency) {
+            setExistingAssessment(null);
+            setCurrentStep(1);
+            setSymptomMode('select_mode');
+            setTriageQuestionIndex(0);
+            setTriageAnswers({});
+            setCheckingAssessment(false);
+            return;
+          }
+
           let careLabel = 'PRIMARY CARE RECOMMENDED';
           let guidanceNote = validAssessment.recommendation || 'A Primary Health Centre evaluation may be appropriate.';
           let badgeCol = '#b45309';
           let badgeBgCol = '#fef3c7';
           let careType: 'SELF_CARE' | 'PHC' | 'HIGHER_LEVEL' | 'EMERGENCY' = 'PHC';
 
-          if (isEmergency) {
-            careLabel = 'EMERGENCY CARE RECOMMENDED';
-            careType = 'EMERGENCY';
-            badgeCol = '#dc2626';
-            badgeBgCol = '#fee2e2';
-          } else if (tLevel.includes('SELF')) {
+          if (tLevel.includes('SELF')) {
             careLabel = 'SELF-CARE / MILD SYMPTOMS';
             careType = 'SELF_CARE';
             badgeCol = '#059669';
@@ -168,27 +209,32 @@ export const AppointmentBookingModal: React.FC<{
             badgeBgCol = '#ffedd5';
           }
 
+          // The saved assessment only stores English symptom names, not
+          // question IDs - reverse-map each back to its question to build a
+          // properly localized summary sentence and tag list.
+          const matchedQuestions = symList
+            .map((name) => TRIAGE_QUESTIONS.find((q) => q.name === name))
+            .filter((q): q is TriageQuestion => !!q);
+          const localizedSymList = matchedQuestions.length > 0
+            ? matchedQuestions.map((q) => SYMPTOM_SUMMARY_NAMES[q.id]?.[currentLang] || SYMPTOM_SUMMARY_NAMES[q.id]?.en || q.name)
+            : symList;
+
           setGuidanceResult({
-            symptomsList: symList,
+            symptomsList: localizedSymList,
             careLevel: careLabel,
             careLevelType: careType,
             guidanceText: guidanceNote,
             badgeColor: badgeCol,
             badgeBg: badgeBgCol
           });
+          setSymptomSummarySentence(buildSymptomSummarySentence(matchedQuestions.map((q) => q.id), currentLang));
 
           setReason(symList.slice(0, 3).join(', '));
 
-          if (isEmergency) {
-            // Emergency escalation logic
-            setSymptomMode('emergency_blocked');
-            setCurrentStep(1);
-          } else {
-            // FLOW A: Assessment already completed!
-            // Skip Step 1 and proceed directly to Step 2 (Patient Details)
-            setSymptomMode('guidance');
-            setCurrentStep(2);
-          }
+          // FLOW A: Assessment already completed (and not an emergency) -
+          // skip Step 1 and proceed directly to Step 2 (Patient Details)
+          setSymptomMode('guidance');
+          setCurrentStep(2);
         } else {
           // FLOW B: No completed assessment found
           setExistingAssessment(null);
@@ -235,79 +281,102 @@ export const AppointmentBookingModal: React.FC<{
   };
 
   // STEP 1 OPTION A: Existing Health Assessment (10 questions, strict completion unless emergency)
-  const handleTriageAnswer = (answer: boolean) => {
+  // 1. Select YES or NO for the current question - stores the answer only,
+  // does not advance. Mirrors the two-step select-then-Next pattern used by
+  // the main Check Your Symptoms assessment elsewhere in the app.
+  const handleSelectTriageAnswer = (answer: boolean) => {
     const currentQ = TRIAGE_QUESTIONS[triageQuestionIndex];
-    const newAnswers = { ...triageAnswers, [currentQ.id]: answer };
-    setTriageAnswers(newAnswers);
+    setTriageAnswers((prev) => ({ ...prev, [currentQ.id]: answer }));
+  };
 
-    // Emergency red flag detection
-    if (answer && currentQ.isEmergencyRedFlag) {
-      setTriggeredRedFlag(currentQ);
-      setSymptomMode('emergency_blocked');
+  // 2. Next Question / Complete Assessment - advances only once the current
+  // question has an answer. Emergency red-flag detection is evaluated only
+  // after all 10 questions are answered (not mid-quiz), so answering a
+  // single red-flag question YES never interrupts the assessment in progress.
+  const handleTriageNext = () => {
+    const currentQ = TRIAGE_QUESTIONS[triageQuestionIndex];
+    if (triageAnswers[currentQ.id] === undefined) return; // must select YES or NO first
+
+    if (triageQuestionIndex < TRIAGE_QUESTIONS.length - 1) {
+      setTriageQuestionIndex((prev) => prev + 1);
       return;
     }
 
-    // Do NOT finish early after 1-2 questions: proceed through all configured questions
-    if (triageQuestionIndex < TRIAGE_QUESTIONS.length - 1) {
-      setTriageQuestionIndex(prev => prev + 1);
-    } else {
-      // Evaluate completed assessment
-      const evaluated: TriageResult = evaluateTriage(newAnswers);
-      const reported = TRIAGE_QUESTIONS
-        .filter(q => newAnswers[q.id] === true)
-        .map(q => q.name);
+    // Final question answered - evaluate the completed assessment.
+    // Emergency status is still computed and saved (the underlying triage
+    // logic is unchanged), but within this Book OPD flow it never routes to
+    // a blocking "Emergency Care Recommended" screen - only a brief,
+    // patient-friendly symptom recap is shown, and the user continues
+    // booking normally. (The emergency-care feature itself is untouched
+    // elsewhere in the app.)
+    const evaluated: TriageResult = evaluateTriage(triageAnswers);
+    const reportedIds = TRIAGE_QUESTIONS.filter(q => triageAnswers[q.id] === true).map(q => q.id);
+    const reported = TRIAGE_QUESTIONS
+      .filter(q => triageAnswers[q.id] === true)
+      .map(q => q.name);
 
-      const symptomsSummaryList = reported.length > 0 ? reported : ['General malaise'];
-      
-      let careLabel = 'PRIMARY CARE RECOMMENDED';
-      let guidanceNote = 'A Primary Health Centre evaluation may be appropriate.';
-      let badgeCol = '#b45309';
-      let badgeBgCol = '#fef3c7';
+    const symptomsSummaryList = reported.length > 0 ? reported : ['General malaise'];
+    const localizedSymptomsList = reportedIds.length > 0
+      ? reportedIds.map((id) => SYMPTOM_SUMMARY_NAMES[id]?.[currentLang] || SYMPTOM_SUMMARY_NAMES[id]?.en || id)
+      : [currentLang === 'mr' ? 'कोणतीही विशिष्ट लक्षणे नाहीत' : currentLang === 'hi' ? 'कोई विशेष लक्षण नहीं' : 'No specific symptoms'];
 
-      if (evaluated.category === 'SELF_CARE') {
-        careLabel = 'SELF-CARE / MILD SYMPTOMS';
-        guidanceNote = 'Routine consultation or home monitoring advised if symptoms persist.';
-        badgeCol = '#059669';
-        badgeBgCol = '#d1fae5';
-      } else if (evaluated.category === 'HIGHER_LEVEL') {
-        careLabel = 'SECONDARY CARE RECOMMENDED';
-        guidanceNote = 'Community Health Centre or Sub-District Hospital evaluation suggested.';
-        badgeCol = '#c2410c';
-        badgeBgCol = '#ffedd5';
-      }
+    let careLabel = 'PRIMARY CARE RECOMMENDED';
+    let guidanceNote = 'A Primary Health Centre evaluation may be appropriate.';
+    let badgeCol = '#b45309';
+    let badgeBgCol = '#fef3c7';
 
-      setGuidanceResult({
-        symptomsList: symptomsSummaryList,
-        careLevel: careLabel,
-        careLevelType: evaluated.category,
-        guidanceText: guidanceNote,
-        badgeColor: badgeCol,
-        badgeBg: badgeBgCol
-      });
-
-      setReason(symptomsSummaryList.slice(0, 3).join(', '));
-      setSymptomMode('guidance');
-
-      // Persist retaken/completed assessment to backend so subsequent bookings and longitudinal records have it
-      const activePId = patientProfile?.id || (currentUser?.role === 'patient' ? currentUser?.id : null) || patientIdDisplay;
-      api.saveAssessment({
-        patient_id: activePId,
-        symptoms: symptomsSummaryList,
-        triage_level: evaluated.category,
-        recommendation: guidanceNote,
-        recommended_facility_id: facilityId,
-        emergency_flag: evaluated.isEmergency
-      }).then((res) => {
-        if (res?.assessment) {
-          setExistingAssessment(res.assessment);
-        }
-        window.dispatchEvent(new CustomEvent('seva_assessment_updated', {
-          detail: { patientId: activePId, assessment: res?.assessment }
-        }));
-      }).catch((e) => {
-        console.error('Error saving retaken assessment:', e);
-      });
+    if (evaluated.category === 'EMERGENCY') {
+      careLabel = 'EMERGENCY CARE RECOMMENDED';
+      guidanceNote = 'Immediate emergency medical attention is recommended based on your responses.';
+      badgeCol = '#dc2626';
+      badgeBgCol = '#fee2e2';
+    } else if (evaluated.category === 'SELF_CARE') {
+      careLabel = 'SELF-CARE / MILD SYMPTOMS';
+      guidanceNote = 'Routine consultation or home monitoring advised if symptoms persist.';
+      badgeCol = '#059669';
+      badgeBgCol = '#d1fae5';
+    } else if (evaluated.category === 'HIGHER_LEVEL') {
+      careLabel = 'SECONDARY CARE RECOMMENDED';
+      guidanceNote = 'Community Health Centre or Sub-District Hospital evaluation suggested.';
+      badgeCol = '#c2410c';
+      badgeBgCol = '#ffedd5';
     }
+
+    setGuidanceResult({
+      symptomsList: localizedSymptomsList,
+      careLevel: careLabel,
+      careLevelType: evaluated.category,
+      guidanceText: guidanceNote,
+      badgeColor: badgeCol,
+      badgeBg: badgeBgCol
+    });
+    setSymptomSummarySentence(buildSymptomSummarySentence(reportedIds, currentLang));
+
+    setReason(symptomsSummaryList.slice(0, 3).join(', '));
+
+    // Always continue to the brief symptom summary - never the blocking
+    // emergency screen - within this booking flow.
+    setSymptomMode('guidance');
+
+    // Persist retaken/completed assessment to backend so subsequent bookings and longitudinal records have it
+    const activePId = patientProfile?.id || (currentUser?.role === 'patient' ? currentUser?.id : null) || patientIdDisplay;
+    api.saveAssessment({
+      patient_id: activePId,
+      symptoms: symptomsSummaryList,
+      triage_level: evaluated.category,
+      recommendation: guidanceNote,
+      recommended_facility_id: facilityId,
+      emergency_flag: evaluated.isEmergency
+    }).then((res) => {
+      if (res?.assessment) {
+        setExistingAssessment(res.assessment);
+      }
+      window.dispatchEvent(new CustomEvent('seva_assessment_updated', {
+        detail: { patientId: activePId, assessment: res?.assessment }
+      }));
+    }).catch((e) => {
+      console.error('Error saving retaken assessment:', e);
+    });
   };
 
   // STEP 1 OPTION B: Rural-friendly symptom description
@@ -843,14 +912,22 @@ export const AppointmentBookingModal: React.FC<{
                   )}
 
                   {/* Option A: Digital Triage Questions */}
-                  {symptomMode === 'assessment' && (
+                  {symptomMode === 'assessment' && (() => {
+                    const currentTriageQ = TRIAGE_QUESTIONS[triageQuestionIndex];
+                    const selectedAnswer = triageAnswers[currentTriageQ.id];
+                    const hasAnswer = selectedAnswer !== undefined;
+                    const isYesSelected = selectedAnswer === true;
+                    const isNoSelected = selectedAnswer === false;
+                    const isLastTriageQuestion = triageQuestionIndex === TRIAGE_QUESTIONS.length - 1;
+
+                    return (
                     <div>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.85rem' }}>
                         <span style={{ fontSize: '0.8rem', fontWeight: 700, color: '#0f766e' }}>
-                          Question {triageQuestionIndex + 1} of {TRIAGE_QUESTIONS.length}
+                          {currentLang === 'mr' ? 'प्रश्न' : currentLang === 'hi' ? 'प्रश्न' : 'Question'} {triageQuestionIndex + 1} {currentLang === 'mr' ? 'पैकी' : currentLang === 'hi' ? 'में से' : 'of'} {TRIAGE_QUESTIONS.length}
                         </span>
                         <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
-                          {Math.round(((triageQuestionIndex) / TRIAGE_QUESTIONS.length) * 100)}% Completed
+                          {Math.round(((triageQuestionIndex + 1) / TRIAGE_QUESTIONS.length) * 100)}{currentLang === 'mr' ? '% पूर्ण' : currentLang === 'hi' ? '% पूर्ण' : '% Completed'}
                         </span>
                       </div>
 
@@ -877,10 +954,10 @@ export const AppointmentBookingModal: React.FC<{
                         justifyContent: 'center'
                       }}>
                         <h4 style={{ fontSize: '1.15rem', fontWeight: 800, color: '#0f172a', margin: '0 0 0.5rem', lineHeight: 1.4 }}>
-                          {TRIAGE_QUESTIONS[triageQuestionIndex].questionText[currentLang] || TRIAGE_QUESTIONS[triageQuestionIndex].questionText.en}
+                          {currentTriageQ.questionText[currentLang] || currentTriageQ.questionText.en}
                         </h4>
                         <p style={{ fontSize: '0.88rem', color: '#475569', margin: 0 }}>
-                          {TRIAGE_QUESTIONS[triageQuestionIndex].subText[currentLang] || TRIAGE_QUESTIONS[triageQuestionIndex].subText.en}
+                          {currentTriageQ.subText[currentLang] || currentTriageQ.subText.en}
                         </p>
                       </div>
 
@@ -888,12 +965,13 @@ export const AppointmentBookingModal: React.FC<{
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1.25rem' }}>
                         <button
                           type="button"
-                          onClick={() => handleTriageAnswer(true)}
+                          onClick={() => handleSelectTriageAnswer(true)}
+                          aria-pressed={isYesSelected}
                           style={{
                             padding: '1.1rem',
-                            background: '#f0fdf4',
-                            border: '2px solid #16a34a',
-                            color: '#15803d',
+                            background: isYesSelected ? '#dcfce7' : '#f8fafc',
+                            border: isYesSelected ? '2.5px solid #16a34a' : '2px solid #cbd5e1',
+                            color: isYesSelected ? '#15803d' : '#475569',
                             borderRadius: '0.85rem',
                             fontSize: '1.1rem',
                             fontWeight: 800,
@@ -902,23 +980,23 @@ export const AppointmentBookingModal: React.FC<{
                             alignItems: 'center',
                             justifyContent: 'center',
                             gap: '0.5rem',
+                            boxShadow: isYesSelected ? '0 0 0 3px rgba(22, 163, 74, 0.2)' : 'none',
                             transition: 'all 0.15s ease'
                           }}
-                          onMouseEnter={(e) => e.currentTarget.style.background = '#dcfce7'}
-                          onMouseLeave={(e) => e.currentTarget.style.background = '#f0fdf4'}
                         >
                           <Check size={22} />
-                          <span>{currentLang === 'mr' ? 'होय (YES)' : currentLang === 'hi' ? 'हाँ (YES)' : 'YES'}</span>
+                          <span>{currentLang === 'mr' ? 'होय' : currentLang === 'hi' ? 'हाँ' : 'YES'}</span>
                         </button>
 
                         <button
                           type="button"
-                          onClick={() => handleTriageAnswer(false)}
+                          onClick={() => handleSelectTriageAnswer(false)}
+                          aria-pressed={isNoSelected}
                           style={{
                             padding: '1.1rem',
-                            background: '#f8fafc',
-                            border: '2px solid #94a3b8',
-                            color: '#475569',
+                            background: isNoSelected ? '#e0f2fe' : '#f8fafc',
+                            border: isNoSelected ? '2.5px solid #0284c7' : '2px solid #94a3b8',
+                            color: isNoSelected ? '#0369a1' : '#475569',
                             borderRadius: '0.85rem',
                             fontSize: '1.1rem',
                             fontWeight: 800,
@@ -927,17 +1005,51 @@ export const AppointmentBookingModal: React.FC<{
                             alignItems: 'center',
                             justifyContent: 'center',
                             gap: '0.5rem',
+                            boxShadow: isNoSelected ? '0 0 0 3px rgba(2, 132, 199, 0.2)' : 'none',
                             transition: 'all 0.15s ease'
                           }}
-                          onMouseEnter={(e) => e.currentTarget.style.background = '#f1f5f9'}
-                          onMouseLeave={(e) => e.currentTarget.style.background = '#f8fafc'}
                         >
                           <X size={22} />
-                          <span>{currentLang === 'mr' ? 'नाही (NO)' : currentLang === 'hi' ? 'नहीं (NO)' : 'NO'}</span>
+                          <span>{currentLang === 'mr' ? 'नाही' : currentLang === 'hi' ? 'नहीं' : 'NO'}</span>
                         </button>
                       </div>
 
-                      {/* Back button */}
+                      {/* Next Question / Complete Assessment button */}
+                      <div style={{ marginBottom: '1.25rem' }}>
+                        <button
+                          type="button"
+                          onClick={handleTriageNext}
+                          disabled={!hasAnswer}
+                          style={{
+                            width: '100%',
+                            padding: '0.85rem',
+                            background: hasAnswer ? 'linear-gradient(135deg, #0f766e 0%, #0d9488 100%)' : '#e2e8f0',
+                            color: hasAnswer ? '#ffffff' : '#94a3b8',
+                            border: 'none',
+                            borderRadius: '0.85rem',
+                            fontSize: '0.95rem',
+                            fontWeight: 800,
+                            cursor: hasAnswer ? 'pointer' : 'not-allowed',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '0.5rem',
+                            boxShadow: hasAnswer ? '0 4px 12px rgba(13, 148, 136, 0.3)' : 'none',
+                            transition: 'all 0.15s ease'
+                          }}
+                        >
+                          <span>
+                            {isLastTriageQuestion
+                              ? (currentLang === 'mr' ? 'मूल्यांकन पूर्ण करा' : currentLang === 'hi' ? 'मूल्यांकन पूर्ण करें' : 'Complete Assessment')
+                              : (currentLang === 'mr' ? 'पुढील प्रश्न' : currentLang === 'hi' ? 'अगला प्रश्न' : 'Next Question')}
+                          </span>
+                          <ArrowRight size={18} />
+                        </button>
+                      </div>
+
+                      {/* Previous Question button - a real, clearly bordered
+                          button (not a plain link), matching the app's
+                          existing secondary-button styling language. */}
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <button
                           type="button"
@@ -949,27 +1061,33 @@ export const AppointmentBookingModal: React.FC<{
                             }
                           }}
                           style={{
-                            background: 'transparent',
-                            border: 'none',
-                            color: '#64748b',
-                            display: 'flex',
+                            background: '#ffffff',
+                            border: '1px solid #cbd5e1',
+                            color: '#475569',
+                            display: 'inline-flex',
                             alignItems: 'center',
-                            gap: '0.35rem',
+                            gap: '0.4rem',
                             cursor: 'pointer',
-                            fontWeight: 600,
-                            fontSize: '0.85rem'
+                            fontWeight: 700,
+                            fontSize: '0.85rem',
+                            padding: '0.55rem 0.9rem',
+                            borderRadius: '8px',
+                            boxShadow: '0 1px 2px rgba(0, 0, 0, 0.04)'
                           }}
                         >
                           <ArrowLeft size={16} />
                           <span>{t.previousBtn || 'Previous'}</span>
                         </button>
 
-                        <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>
-                          {currentLang === 'mr' ? 'योग्य उत्तरावर क्लिक करा' : currentLang === 'hi' ? 'सही विकल्प चुनें' : 'Select YES or NO'}
+                        <span style={{ fontSize: '0.78rem', color: hasAnswer ? '#0d9488' : '#94a3b8', fontWeight: hasAnswer ? 700 : 400 }}>
+                          {hasAnswer
+                            ? (currentLang === 'mr' ? '✓ उत्तर निवडले' : currentLang === 'hi' ? '✓ उत्तर चुना गया' : '✓ Answer selected')
+                            : (currentLang === 'mr' ? 'योग्य उत्तरावर क्लिक करा' : currentLang === 'hi' ? 'सही विकल्प चुनें' : 'Select YES or NO')}
                         </span>
                       </div>
                     </div>
-                  )}
+                    );
+                  })()}
 
                   {/* Option B: Describe Symptoms Form */}
                   {symptomMode === 'describe' && (
@@ -1283,20 +1401,23 @@ export const AppointmentBookingModal: React.FC<{
                         </div>
                       </div>
 
-                      {/* Guidance Box */}
+                      {/* Brief, patient-friendly symptom summary - built from the
+                          patient's actual answers, in their selected language.
+                          Deliberately neutral (not a diagnosis, not an
+                          emergency-styled alert) regardless of triage category. */}
                       <div style={{
-                        background: guidanceResult.badgeBg,
-                        border: `1.5px solid ${guidanceResult.badgeColor}`,
+                        background: '#f0fdfa',
+                        border: '1.5px solid #99f6e4',
                         borderRadius: '0.85rem',
                         padding: '1.15rem',
                         marginBottom: '1.25rem'
                       }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: guidanceResult.badgeColor, fontWeight: 800, fontSize: '0.95rem', marginBottom: '0.4rem' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#0f766e', fontWeight: 800, fontSize: '0.95rem', marginBottom: '0.4rem' }}>
                           <Activity size={18} />
-                          <span>{guidanceResult.careLevel}</span>
+                          <span>{currentLang === 'mr' ? 'तुमच्या नोंदवलेल्या लक्षणांचा सारांश' : currentLang === 'hi' ? 'आपके बताए गए लक्षणों का सारांश' : 'Summary of Your Reported Symptoms'}</span>
                         </div>
                         <p style={{ color: '#1e293b', fontSize: '0.88rem', margin: 0, lineHeight: 1.4 }}>
-                          {guidanceResult.guidanceText}
+                          {symptomSummarySentence}
                         </p>
                       </div>
 

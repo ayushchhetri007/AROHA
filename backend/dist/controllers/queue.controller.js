@@ -7,6 +7,11 @@ exports.updateTokenStatus = exports.callNextToken = exports.getFacilityQueue = v
 const db_js_1 = __importDefault(require("../config/db.js"));
 const getFacilityQueue = (req, res) => {
     const facilityId = req.query.facility_id || 'fac-phc-shirwal';
+    // The Live Token Queue must only ever show genuine live-queue entries.
+    // 'booked' tokens (appointment made, but not yet checked into the live
+    // queue) are excluded by default. Staff-facing queue-management views that
+    // need to see - and check in - pending bookings pass ?scope=all.
+    const includeBooked = req.query.scope === 'all';
     const tokens = db_js_1.default.prepare(`
     SELECT q.*, p.full_name as patient_name, p.age, p.gender, p.village,
            a.appointment_number, a.service_name, a.priority,
@@ -16,13 +21,15 @@ const getFacilityQueue = (req, res) => {
     JOIN appointments a ON q.appointment_id = a.id
     LEFT JOIN doctors d ON q.doctor_id = d.id
     WHERE q.facility_id = ?
+    ${includeBooked ? '' : "AND q.status != 'booked'"}
     ORDER BY
       CASE q.status
         WHEN 'in_progress' THEN 1
         WHEN 'called' THEN 2
         WHEN 'waiting' THEN 3
-        WHEN 'completed' THEN 4
-        ELSE 5
+        WHEN 'booked' THEN 4
+        WHEN 'completed' THEN 5
+        ELSE 6
       END,
       q.token_number ASC
   `).all(facilityId);
