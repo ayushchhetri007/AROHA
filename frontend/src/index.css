@@ -1,0 +1,277 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@400;500;600;700&display=swap');
+
+:root {
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-heading: 'Outfit', 'Inter', sans-serif;
+
+  /* Theme Palette */
+  --primary-50: #f0fdfa;
+  --primary-100: #ccfbf1;
+  --primary-500: #14b8a6;
+  --primary-600: #0d9488;
+  --primary-700: #0f766e;
+  --primary-800: #115e59;
+  --primary-900: #134e4a;
+
+  --accent-blue: #0284c7;
+  --accent-amber: #f59e0b;
+  --accent-emerald: #10b981;
+  --accent-rose: #f43f5e;
+
+  --slate-50: #f8fafc;
+  --slate-100: #f1f5f9;
+  --slate-200: #e2e8f0;
+  --slate-300: #cbd5e1;
+  --slate-400: #94a3b8;
+  --slate-500: #64748b;
+  --slate-600: #475569;
+  --slate-700: #334155;
+  --slate-800: #1e293b;
+  --slate-900: #0f172a;
+
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+  --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: #f8fafc;
+  color: var(--slate-800);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Low-Literacy Mode Styles */
+body.low-literacy-mode {
+  font-size: 1.15rem;
+}
+body.low-literacy-mode button,
+body.low-literacy-mode .nav-link,
+body.low-literacy-mode .action-card {
+  padding: 1.25rem 1.5rem !important;
+  font-size: 1.25rem !important;
+  font-weight: 700 !important;
+  border-width: 2px !important;
+}
+body.low-literacy-mode .icon-large {
+  transform: scale(1.3);
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Glassmorphism helpers */
+.glass-panel {
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(226, 232, 240, 0.8);
+  border-radius: 1rem;
+}
+
+.glass-header {
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--slate-200);
+}
+
+/* Custom Animation Utilities */
+@keyframes pulse-subtle {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.85; transform: scale(1.02); }
+}
+
+.animate-pulse-subtle {
+  animation: pulse-subtle 2s infinite ease-in-out;
+}
+
+@keyframes badge-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4); }
+  50% { box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
+}
+
+.animate-glow {
+  animation: badge-glow 2s infinite;
+}
+
+/* Typography styles */
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-heading);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--slate-900);
+}
+
+/* Responsive Profile Button */
+@media (max-width: 640px) {
+  .profile-btn-text {
+    display: none !important;
+  }
+}
+
+/* ==============================================================
+   HEALTHCARE SERVICES 2x2 GRID & CARDS (PATIENT DASHBOARD)
+   ============================================================== */
+.healthcare-services-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.25rem;
+  width: 100%;
+}
+
+@media (max-width: 768px) {
+  .healthcare-services-grid {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+}
+
+/* ==============================================================
+   LIVE OPD QUEUE: NAVIGATION MAP (LEFT) + WAITING IN QUEUE (RIGHT)
+   ============================================================== */
+.live-queue-nav-layout {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 1.5rem;
+  width: 100%;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .live-queue-nav-layout {
+    grid-template-columns: 1fr;
+    gap: 1.25rem;
+  }
+}
+
+/* ==============================================================
+   LIVE OPD QUEUE: QUEUE TRACKER (LEFT ~62%) + REFERRALS (RIGHT ~38%)
+   ============================================================== */
+.live-queue-referrals-grid {
+  display: grid;
+  grid-template-columns: 1.6fr 1fr;
+  gap: 1.5rem;
+  width: 100%;
+  align-items: start;
+  margin-bottom: 2.25rem;
+}
+
+@media (max-width: 992px) {
+  .live-queue-referrals-grid {
+    grid-template-columns: 1fr;
+    gap: 1.5rem;
+  }
+}
+
+@keyframes icon-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.icon-spin {
+  animation: icon-spin 0.8s linear infinite;
+}
+
+.healthcare-service-card {
+  background: #ffffff;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 16px;
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  justifyContent: space-between;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.04);
+  transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  cursor: pointer;
+  text-align: left;
+  position: relative;
+  overflow: hidden;
+  outline: none;
+}
+
+.healthcare-service-card:hover {
+  transform: translateY(-3px);
+  border-color: #0d9488;
+  box-shadow: 0 12px 28px -6px rgba(13, 148, 136, 0.18), 0 4px 10px rgba(0, 0, 0, 0.04);
+}
+
+.healthcare-service-card:focus-visible {
+  border-color: #0d9488;
+  box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.3);
+}
+
+.healthcare-service-card .card-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-weight: 700;
+  font-size: 0.92rem;
+  transition: gap 0.18s ease, transform 0.18s ease;
+}
+
+.healthcare-service-card:hover .card-action-btn {
+  gap: 0.7rem;
+}
+
+/* ==============================================================
+   APPOINTMENTS, REFERRALS & FOLLOW-UPS 3-CARD GRID
+   ============================================================== */
+.appointments-referrals-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1.25rem;
+  width: 100%;
+}
+
+@media (max-width: 1024px) {
+  .appointments-referrals-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 680px) {
+  .appointments-referrals-grid {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+}
+
+/* ==============================================================
+   PATIENT DASHBOARD: TRIAGE & EMERGENCY DUAL ACTION SECTION
+   ============================================================== */
+.patient-triage-emergency-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  gap: 1.25rem;
+  width: 100%;
+  margin-bottom: 2rem;
+}
+
+@media (max-width: 900px) {
+  .patient-triage-emergency-grid {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+}
+
+

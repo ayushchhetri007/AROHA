@@ -1,0 +1,39 @@
+/* App base styles */
+#root {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Responsive Split Screen Login Layout */
+@media (max-width: 960px) {
+  .login-hero-panel {
+    display: none !important;
+  }
+
+  .login-form-panel {
+    padding: 1.5rem !important;
+    max-width: 100% !important;
+  }
+}
+
+@media (min-width: 961px) and (max-width: 1200px) {
+  .login-hero-panel {
+    padding: 2rem !important;
+  }
+
+  .login-form-panel {
+    padding: 2rem !important;
+  }
+}

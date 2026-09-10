@@ -1,0 +1,1276 @@
+import React, { useState, useEffect } from 'react';
+import api from '../../api/client';
+import { useDemo } from '../../store/demoContext';
+import {
+  Activity,
+  CheckCircle2,
+  XCircle,
+  Calendar,
+  Clock,
+  ArrowRight,
+  ArrowLeft,
+  X,
+  PhoneCall,
+  Stethoscope,
+  Info,
+  Navigation,
+  RotateCcw,
+  Building2,
+  AlertTriangle,
+  FileText
+} from 'lucide-react';
+import {
+  TRIAGE_QUESTIONS,
+  evaluateTriage,
+  matchRecommendedFacility,
+  TriageLevel,
+  TriageQuestion
+} from './triageEngine';
+import { FacilityNavigationMap } from './FacilityNavigationMap';
+import {
+  LatLng,
+  RouteResult,
+  fallbackEstimate,
+  fetchRoadRoute,
+  formatDistance,
+  formatDuration
+} from '../../utils/navigation';
+
+function hasValidCoords(lat: unknown, lng: unknown): lat is number {
+  return (
+    typeof lat === 'number' && typeof lng === 'number' &&
+    Number.isFinite(lat) && Number.isFinite(lng) &&
+    !(lat === 0 && lng === 0)
+  );
+}
+
+interface SymptomAssessmentModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onOpenBooking: (facilityId?: string) => void;
+  onOpenToken?: () => void;
+  onOpenEmergency: () => void;
+  onExploreFacilities?: (recommendedType?: string) => void;
+  onGetDirections?: (facilityId: string) => void;
+  onViewFacilityDetails?: (facilityId: string) => void;
+}
+
+export const SymptomAssessmentModal: React.FC<SymptomAssessmentModalProps> = ({
+  isOpen,
+  onClose,
+  onOpenBooking,
+  onOpenToken,
+  onOpenEmergency,
+  onExploreFacilities,
+  onGetDirections,
+  onViewFacilityDetails
+}) => {
+  const { language, patientProfile, currentUser, showToast, setCurrentView, setPendingFocusedFacilityId } = useDemo();
+
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [answers, setAnswers] = useState<Record<string, boolean>>({});
+  const [isCompleted, setIsCompleted] = useState(false);
+
+  const [nearbyFacilities, setNearbyFacilities] = useState<any[]>([]);
+  const [facilityDoctors, setFacilityDoctors] = useState<any[]>([]);
+  const [selectedFacilityDetail, setSelectedFacilityDetail] = useState<any | null>(null);
+  const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
+  const [savingAssessment, setSavingAssessment] = useState(false);
+
+  // In-modal "Get Directions" map overlay (never navigates away from this
+  // assessment, so the completed result underneath is never lost).
+  const [isMapModalOpen, setIsMapModalOpen] = useState(false);
+  const [recommendedFacilityDetail, setRecommendedFacilityDetail] = useState<any | null>(null);
+  const [mapPatientCoords, setMapPatientCoords] = useState<LatLng | null>(null);
+  const [mapGeoError, setMapGeoError] = useState<string | null>(null);
+  const [mapLocating, setMapLocating] = useState(false);
+  const [mapRoute, setMapRoute] = useState<RouteResult | null>(null);
+  const [mapRouteIsEstimate, setMapRouteIsEstimate] = useState(false);
+  const [mapRouting, setMapRouting] = useState(false);
+
+  const currentLang = language === 'mr' ? 'mr' : language === 'hi' ? 'hi' : 'en';
+
+  // Reset state when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      setCurrentIndex(0);
+      setAnswers({});
+      setIsCompleted(false);
+      setIsDetailModalOpen(false);
+      setIsMapModalOpen(false);
+      setMapPatientCoords(null);
+      setMapGeoError(null);
+      setMapRoute(null);
+      setMapRouteIsEstimate(false);
+
+      const district = patientProfile?.district || 'Satara';
+      api
+        .getFacilities({ district })
+        .then((data) => setNearbyFacilities(data || []))
+        .catch((err) => console.error('Failed to load facilities for assessment:', err));
+    }
+  }, [isOpen, patientProfile?.district]);
+
+  // Evaluate current triage state
+  const triageResult = evaluateTriage(answers);
+  const matchedFacilityInfo = matchRecommendedFacility(
+    triageResult.category,
+    nearbyFacilities,
+    patientProfile
+  );
+  const recommendedFacility = matchedFacilityInfo.facility || {
+    id: 'fac-phc-shirwal',
+    name: 'Primary Health Centre Shirwal',
+    type: 'PHC',
+    taluka: 'Khandala',
+    district: 'Satara',
+    address: 'Near Main Bazaar, Shirwal, Maharashtra 412801',
+    phone: '02169-244120',
+    emergency_24x7: 1,
+    queue_wait_minutes: 15
+  };
+
+
+  // Fetch real doctors (and full facility record, for map coordinates) for
+  // the recommended facility whenever it changes.
+  useEffect(() => {
+    if (recommendedFacility && recommendedFacility.id) {
+      api
+        .getFacilityById(recommendedFacility.id)
+        .then((data) => {
+          if (data && data.doctors) {
+            setFacilityDoctors(data.doctors);
+          }
+          if (data && data.facility) {
+            setRecommendedFacilityDetail(data.facility);
+          }
+        })
+        .catch((e) => console.warn('Could not fetch doctor roster:', e));
+    }
+  }, [recommendedFacility?.id]);
+
+  // Prefer coordinates already present on the matched facility; fall back to
+  // the freshly-fetched full facility record (covers the hardcoded fallback
+  // facility object, which doesn't carry lat/lng itself).
+  const mapFacilityCoords: LatLng | null = hasValidCoords(recommendedFacility.latitude, recommendedFacility.longitude)
+    ? { lat: recommendedFacility.latitude, lng: recommendedFacility.longitude }
+    : hasValidCoords(recommendedFacilityDetail?.latitude, recommendedFacilityDetail?.longitude)
+    ? { lat: recommendedFacilityDetail.latitude, lng: recommendedFacilityDetail.longitude }
+    : null;
+
+  const computeMapRoute = async (origin: LatLng, destination: LatLng) => {
+    setMapRouting(true);
+    try {
+      const realRoute = await fetchRoadRoute(origin, destination);
+      if (realRoute) {
+        setMapRoute(realRoute);
+        setMapRouteIsEstimate(false);
+      } else {
+        const est = fallbackEstimate(origin, destination);
+        setMapRoute({ distanceMeters: est.distanceKm * 1000, durationSeconds: est.durationSeconds, geometry: [] });
+        setMapRouteIsEstimate(true);
+      }
+    } finally {
+      setMapRouting(false);
+    }
+  };
+
+  // One-shot geolocation lookup for the "Get Directions" map overlay (not a
+  // continuous watch - this is a quick directions preview, not turn-by-turn
+  // navigation, which already exists elsewhere via FacilityNavigationMap).
+  const requestMapLocation = () => {
+    if (!navigator.geolocation) {
+      setMapGeoError('Location services are not supported on this device/browser.');
+      return;
+    }
+    setMapLocating(true);
+    setMapGeoError(null);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        setMapPatientCoords(coords);
+        setMapLocating(false);
+        if (mapFacilityCoords) computeMapRoute(coords, mapFacilityCoords);
+      },
+      (err) => {
+        setMapGeoError(
+          err.code === 1
+            ? 'Location access was denied. You can still see the facility location and address.'
+            : 'Could not determine your location.'
+        );
+        setMapLocating(false);
+      },
+      { timeout: 8000, maximumAge: 60000, enableHighAccuracy: true }
+    );
+  };
+
+  if (!isOpen) return null;
+
+  const currentQuestion = TRIAGE_QUESTIONS[currentIndex];
+  const progressPercent = Math.round(((currentIndex + 1) / TRIAGE_QUESTIONS.length) * 100);
+
+  // 1. Select YES or NO
+  const handleSelectAnswer = (val: boolean) => {
+    setAnswers((prev) => ({ ...prev, [currentQuestion.id]: val }));
+  };
+
+  // 2. Next Question / Complete Assessment
+  const handleNext = () => {
+    const val = answers[currentQuestion.id];
+    if (val === undefined) return; // Must select YES or NO
+
+    if (currentIndex < TRIAGE_QUESTIONS.length - 1) {
+      setCurrentIndex((prev) => prev + 1);
+    } else {
+      // Completed all 10 questions: calculate final triage result
+      setIsCompleted(true);
+      const finalTriage = evaluateTriage(answers);
+      saveAssessmentRecord(answers, finalTriage.category, finalTriage.isEmergency);
+    }
+  };
+
+  // 3. Previous Question
+  const handlePrevious = () => {
+    if (currentIndex > 0) {
+      setCurrentIndex((prev) => prev - 1);
+    }
+  };
+
+  // 4. Retake Assessment
+  const handleRetake = () => {
+    setCurrentIndex(0);
+    setAnswers({});
+    setIsCompleted(false);
+  };
+
+  // 5. Save assessment to backend PostgreSQL/SQLite database
+  const saveAssessmentRecord = async (
+    ans: Record<string, boolean>,
+    triageCategory: TriageLevel,
+    isEmergency: boolean
+  ) => {
+    setSavingAssessment(true);
+    try {
+      const patientId =
+        patientProfile?.id || (currentUser?.role === 'patient' ? currentUser?.id : 'P-10452');
+
+      const reportedSymptoms = Object.keys(ans)
+        .filter((k) => ans[k])
+        .map((k) => TRIAGE_QUESTIONS.find((q) => q.id === k)?.name || k);
+
+      const res = await api.saveAssessment({
+        patient_id: patientId,
+        symptoms: reportedSymptoms,
+        triage_level: triageCategory,
+        recommendation: `Evaluated ${reportedSymptoms.length} reported symptoms across rural health protocol. Triage result: ${triageCategory}. Recommended facility: ${recommendedFacility.name}.`,
+        recommended_facility_id: recommendedFacility.id,
+        emergency_flag: isEmergency
+      });
+      showToast('Health assessment recorded into your longitudinal medical record.', 'success');
+      window.dispatchEvent(new CustomEvent('seva_assessment_updated', {
+        detail: {
+          patientId,
+          assessment: res?.assessment || {
+            patient_id: patientId,
+            symptoms_json: JSON.stringify(reportedSymptoms),
+            triage_level: triageCategory,
+            emergency_flag: isEmergency ? 1 : 0,
+            recommended_facility_id: recommendedFacility.id
+          }
+        }
+      }));
+    } catch (e) {
+      console.error('Failed to save assessment', e);
+    } finally {
+      setSavingAssessment(false);
+    }
+  };
+
+  // Handle in-app directions click: opens the map as an overlay on top of
+  // this same assessment result, so the result stays intact underneath and
+  // "Close" simply dismisses the overlay - no navigation away is needed.
+  const handleDirectionsClick = () => {
+    if (mapFacilityCoords) {
+      setIsMapModalOpen(true);
+      requestMapLocation();
+      return;
+    }
+    // Fallback for the rare case a facility has no known coordinates yet.
+    onClose();
+    if (onGetDirections) {
+      onGetDirections(recommendedFacility.id);
+    } else {
+      setPendingFocusedFacilityId(recommendedFacility.id);
+      setCurrentView('facilities');
+    }
+  };
+
+  // Handle view details click
+  const handleDetailsClick = async () => {
+    try {
+      const data = await api.getFacilityById(recommendedFacility.id);
+      setSelectedFacilityDetail(data);
+      setIsDetailModalOpen(true);
+    } catch (e) {
+      console.error('Failed to load facility detail', e);
+      if (onViewFacilityDetails) {
+        onViewFacilityDetails(recommendedFacility.id);
+      }
+    }
+  };
+
+  // Doctor text
+  const primaryDoctor =
+    facilityDoctors.find((d: any) => d.is_available_today === 1) ||
+    facilityDoctors[0] ||
+    (recommendedFacility.id === 'fac-phc-shirwal'
+      ? { full_name: 'Dr. Anand Deshmukh', specialty: 'General Medicine & Public Health', room_number: 'OPD Room 2' }
+      : { full_name: 'Medical Officer on Duty', specialty: 'General OPD', room_number: 'Room 1' });
+
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 100,
+        background: 'rgba(15, 23, 42, 0.75)',
+        backdropFilter: 'blur(5px)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '1rem'
+      }}
+    >
+      <div
+        style={{
+          width: '100%',
+          maxWidth: '680px',
+          background: '#ffffff',
+          borderRadius: '14px',
+          boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+          overflow: 'hidden',
+          display: 'flex',
+          flexDirection: 'column',
+          maxHeight: '92vh'
+        }}
+      >
+        {/* MODAL HEADER */}
+        <div
+          style={{
+            background: isCompleted && triageResult.category === 'EMERGENCY'
+              ? 'linear-gradient(135deg, #78350f 0%, #b45309 100%)'
+              : 'linear-gradient(135deg, #093430 0%, #0d9488 100%)',
+            color: '#ffffff',
+            padding: '0.75rem 1.25rem',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            transition: 'background 0.2s ease'
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+            <Activity size={19} color="#5eead4" />
+            <div>
+              <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 800, letterSpacing: '-0.01em', lineHeight: 1.25 }}>
+                {isCompleted
+                  ? (currentLang === 'mr'
+                      ? 'आरोग्य तपासणी निकाल व शिफारस'
+                      : currentLang === 'hi'
+                      ? 'स्वास्थ्य जांच परिणाम एवं मार्गदर्शन'
+                      : 'Your Health Assessment Result')
+                  : (currentLang === 'mr'
+                      ? 'लक्षणे तपासा (Check Your Symptoms)'
+                      : currentLang === 'hi'
+                      ? 'लक्षणों की जांच करें (Check Your Symptoms)'
+                      : 'Check Your Symptoms')}
+              </h3>
+              <div style={{ fontSize: '0.76rem', color: '#ccfbf1', marginTop: '0.1rem' }}>
+                {isCompleted
+                  ? 'Preliminary Care Recommendation & Nearest Public Facility'
+                  : 'Stepped Digital Triage & Public Healthcare Guidance'}
+              </div>
+            </div>
+          </div>
+
+          <button
+            onClick={onClose}
+            aria-label="Close Assessment"
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: '#ffffff',
+              cursor: 'pointer',
+              padding: '0.3rem',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderRadius: '6px'
+            }}
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* MEDICAL DISCLAIMER NOTICE */}
+        <div
+          style={{
+            background: '#f8fafc',
+            borderBottom: '1px solid #e2e8f0',
+            padding: '0.5rem 1.25rem',
+            fontSize: '0.78rem',
+            lineHeight: 1.35,
+            color: '#475569',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.4rem'
+          }}
+        >
+          <Info size={14} color="#0d9488" style={{ flexShrink: 0 }} />
+          <span>
+            <strong>
+              {currentLang === 'mr'
+                ? 'निर्णय-सहाय्य सूचना: '
+                : currentLang === 'hi'
+                ? 'निर्णय-सहायता सूचना: '
+                : 'Decision-Support Notice: '}
+            </strong>
+            {currentLang === 'mr'
+              ? 'हे मूल्यमापन प्राथमिक मार्गदर्शन प्रदान करते आणि पात्र वैद्यकीय अधिकाऱ्याच्या तपासणीची जागा घेत नाही. कोणताही वैद्यकीय आजार निदान केला जात नाही.'
+              : currentLang === 'hi'
+              ? 'यह मूल्यांकन प्रारंभिक मार्गदर्शन प्रदान करता है और योग्य डॉक्टर द्वारा जांच का स्थान नहीं लेता है। किसी बीमारी का अंतिम निदान नहीं किया जाता।'
+              : 'This assessment provides preliminary guidance and does not replace examination by a qualified healthcare professional. No medical diagnosis is claimed.'}
+          </span>
+        </div>
+
+        {/* MODAL BODY */}
+        <div style={{ padding: '1.15rem 1.25rem', overflowY: 'auto', flex: 1 }}>
+          {!isCompleted ? (
+            /* ACTIVE STEPPED QUESTION VIEW */
+            <div>
+              {/* PROGRESS BAR & STEP COUNTER */}
+              <div style={{ marginBottom: '1rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem', fontSize: '0.8rem', fontWeight: 600, color: '#475569' }}>
+                  <span>
+                    Question <strong>{currentIndex + 1}</strong> of {TRIAGE_QUESTIONS.length}
+                  </span>
+                  <span style={{ color: '#0d9488', fontWeight: 800 }}>{progressPercent}% Completed</span>
+                </div>
+                <div style={{ width: '100%', height: '7px', background: '#e2e8f0', borderRadius: '9999px', overflow: 'hidden' }}>
+                  <div
+                    style={{
+                      width: `${progressPercent}%`,
+                      height: '100%',
+                      background: currentQuestion.isEmergencyRedFlag
+                        ? 'linear-gradient(90deg, #f97316, #dc2626)'
+                        : 'linear-gradient(90deg, #14b8a6, #0d9488)',
+                      transition: 'width 0.25s ease'
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* QUESTION CARD */}
+              <div
+                style={{
+                  background: currentQuestion.isEmergencyRedFlag ? '#fff7ed' : '#f8fafc',
+                  border: currentQuestion.isEmergencyRedFlag ? '1.5px solid #fed7aa' : '1.5px solid #e2e8f0',
+                  borderRadius: '12px',
+                  padding: '1.15rem 1.15rem',
+                  textAlign: 'center',
+                  marginBottom: '1.15rem'
+                }}
+              >
+                <div
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.3rem',
+                    fontSize: '0.7rem',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.07em',
+                    color: currentQuestion.isEmergencyRedFlag ? '#c2410c' : '#0d9488',
+                    fontWeight: 800,
+                    marginBottom: '0.5rem',
+                    background: currentQuestion.isEmergencyRedFlag ? '#ffedd5' : '#ccfbf1',
+                    padding: '0.15rem 0.55rem',
+                    borderRadius: '9999px'
+                  }}
+                >
+                  {currentQuestion.isEmergencyRedFlag ? (
+                    <>
+                      <AlertTriangle size={12} />
+                      <span>Acute Red-Flag Screening</span>
+                    </>
+                  ) : (
+                    <>
+                      <Activity size={12} />
+                      <span>General Symptom Check</span>
+                    </>
+                  )}
+                </div>
+
+                <h4
+                  style={{
+                    fontSize: '1.4rem',
+                    fontWeight: 800,
+                    color: '#0f172a',
+                    lineHeight: 1.3,
+                    margin: '0 0 0.5rem 0'
+                  }}
+                >
+                  {currentQuestion.questionText[currentLang]}
+                </h4>
+
+                {/* Subtext / Vernacular Context */}
+                <div style={{ fontSize: '0.95rem', color: '#64748b', fontWeight: 500 }}>
+                  {currentQuestion.subText[currentLang]}
+                </div>
+
+                {currentLang !== 'mr' && (
+                  <div style={{ fontSize: '0.9rem', color: '#94a3b8', marginTop: '0.4rem', fontStyle: 'italic' }}>
+                    {currentQuestion.questionText.mr}
+                  </div>
+                )}
+              </div>
+
+              {/* YES / NO BUTTONS */}
+              {(() => {
+                const isYesSelected = answers[currentQuestion.id] === true;
+                const isNoSelected = answers[currentQuestion.id] === false;
+                const hasAnswer = answers[currentQuestion.id] !== undefined;
+                const isLastQuestion = currentIndex === TRIAGE_QUESTIONS.length - 1;
+
+                return (
+                  <>
+                    <div
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                        gap: '0.85rem',
+                        marginBottom: '1.1rem'
+                      }}
+                    >
+                      {/* YES BUTTON */}
+                      <button
+                        type="button"
+                        onClick={() => handleSelectAnswer(true)}
+                        aria-pressed={isYesSelected}
+                        style={{
+                          padding: '0.85rem 0.75rem',
+                          borderRadius: '10px',
+                          border: isYesSelected ? '2.5px solid #0d9488' : '1.5px solid #cbd5e1',
+                          background: isYesSelected ? '#f0fdfa' : '#ffffff',
+                          color: isYesSelected ? '#0f766e' : '#334155',
+                          fontSize: '1.2rem',
+                          fontWeight: 900,
+                          cursor: 'pointer',
+                          boxShadow: isYesSelected
+                            ? '0 0 0 3px rgba(13, 148, 136, 0.25), 0 4px 12px rgba(13, 148, 136, 0.15)'
+                            : '0 2px 8px rgba(0, 0, 0, 0.04)',
+                          transition: 'all 0.15s ease',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'center',
+                          gap: '0.3rem',
+                          minHeight: '90px'
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                          {isYesSelected && <CheckCircle2 size={18} color="#0d9488" />}
+                          <span>YES / हाँ / होय</span>
+                        </div>
+                        <span
+                          style={{
+                            fontSize: '0.83rem',
+                            fontWeight: 700,
+                            color: isYesSelected ? '#0d9488' : '#64748b'
+                          }}
+                        >
+                          {isYesSelected
+                            ? (currentLang === 'mr' ? '✓ निवडले (मला हे लक्षण आहे)' : '✓ Selected (I have this symptom)')
+                            : (currentLang === 'mr' ? 'मला हे लक्षण आहे' : 'I have this symptom')}
+                        </span>
+                      </button>
+
+                      {/* NO BUTTON */}
+                      <button
+                        type="button"
+                        onClick={() => handleSelectAnswer(false)}
+                        aria-pressed={isNoSelected}
+                        style={{
+                          padding: '0.85rem 0.75rem',
+                          borderRadius: '10px',
+                          border: isNoSelected ? '2.5px solid #0284c7' : '1.5px solid #cbd5e1',
+                          background: isNoSelected ? '#f0f9ff' : '#ffffff',
+                          color: isNoSelected ? '#0369a1' : '#334155',
+                          fontSize: '1.2rem',
+                          fontWeight: 900,
+                          cursor: 'pointer',
+                          boxShadow: isNoSelected
+                            ? '0 0 0 3px rgba(2, 132, 199, 0.25), 0 4px 12px rgba(2, 132, 199, 0.15)'
+                            : '0 2px 8px rgba(0, 0, 0, 0.04)',
+                          transition: 'all 0.15s ease',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'center',
+                          gap: '0.3rem',
+                          minHeight: '90px'
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                          {isNoSelected && <CheckCircle2 size={18} color="#0284c7" />}
+                          <span>NO / नहीं / नाही</span>
+                        </div>
+                        <span
+                          style={{
+                            fontSize: '0.83rem',
+                            fontWeight: 700,
+                            color: isNoSelected ? '#0284c7' : '#64748b'
+                          }}
+                        >
+                          {isNoSelected
+                            ? (currentLang === 'mr' ? '✓ निवडले (मला हे लक्षण नाही)' : '✓ Selected (I do not have this)')
+                            : (currentLang === 'mr' ? 'मला हे लक्षण नाही' : 'I do not have this')}
+                        </span>
+                      </button>
+                    </div>
+
+                    {/* PROMINENT NEXT QUESTION / COMPLETE ASSESSMENT BUTTON */}
+                    <div style={{ marginBottom: '0.9rem', display: 'flex', justifyContent: 'center' }}>
+                      <button
+                        type="button"
+                        onClick={handleNext}
+                        disabled={!hasAnswer}
+                        aria-label={isLastQuestion ? 'Complete Assessment' : 'Next Question'}
+                        style={{
+                          width: '100%',
+                          maxWidth: '460px',
+                          padding: '0.75rem 1.5rem',
+                          borderRadius: '10px',
+                          border: 'none',
+                          background: hasAnswer
+                            ? (isLastQuestion
+                                ? 'linear-gradient(135deg, #059669 0%, #047857 100%)'
+                                : 'linear-gradient(135deg, #0d9488 0%, #0f766e 100%)')
+                            : '#e2e8f0',
+                          color: hasAnswer ? '#ffffff' : '#94a3b8',
+                          fontSize: '0.98rem',
+                          fontWeight: 800,
+                          cursor: hasAnswer ? 'pointer' : 'not-allowed',
+                          boxShadow: hasAnswer ? '0 4px 14px rgba(13, 148, 136, 0.35)' : 'none',
+                          transition: 'all 0.18s ease',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '0.5rem',
+                          minHeight: '44px'
+                        }}
+                      >
+                        <span>
+                          {isLastQuestion
+                            ? (currentLang === 'mr' ? 'तपासणी पूर्ण करा (Get Care Recommendation)' : 'Complete Assessment & View Recommendation')
+                            : (currentLang === 'mr' ? 'पुढील प्रश्न →' : 'Next Question →')}
+                        </span>
+                        <ArrowRight size={17} />
+                      </button>
+                    </div>
+
+                    {/* PREVIOUS QUESTION & HELPER HINT */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+                      {currentIndex > 0 ? (
+                        <button
+                          type="button"
+                          onClick={handlePrevious}
+                          style={{
+                            background: 'transparent',
+                            border: 'none',
+                            color: '#475569',
+                            fontSize: '0.9rem',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.4rem',
+                            padding: '0.4rem 0.6rem',
+                            borderRadius: '6px'
+                          }}
+                        >
+                          <ArrowLeft size={16} />
+                          <span>{currentLang === 'mr' ? 'मागील प्रश्न' : 'Previous Question'}</span>
+                        </button>
+                      ) : (
+                        <div />
+                      )}
+
+                      <span style={{ fontSize: '0.82rem', color: hasAnswer ? '#0d9488' : '#94a3b8', fontWeight: 600 }}>
+                        {hasAnswer
+                          ? (currentLang === 'mr' ? '✓ उत्तर निवडले — पुढे जाण्यासाठी पुढील बटण दाबा' : '✓ Answer selected — Click Next to proceed')
+                          : (currentLang === 'mr' ? 'कृपया पुढे जाण्यासाठी होय किंवा नाही निवडा' : 'Please select YES or NO to continue')}
+                      </span>
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+          ) : (
+            /* FINAL CARE RECOMMENDATION RESULT SCREEN */
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+              {/* SECTION A: TRIAGE CARE LEVEL BADGE & RECOMMENDATION */}
+              <div
+                style={{
+                  background: triageResult.badgeBg,
+                  border: `2px solid ${triageResult.badgeBorder}`,
+                  borderRadius: '16px',
+                  padding: '1.5rem',
+                  boxShadow: `0 6px 20px -2px ${triageResult.badgeColor}22`
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.65rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                  <span
+                    style={{
+                      background: triageResult.badgeColor,
+                      color: '#ffffff',
+                      padding: '0.35rem 0.85rem',
+                      borderRadius: '9999px',
+                      fontSize: '0.82rem',
+                      fontWeight: 900,
+                      letterSpacing: '0.04em',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.4rem'
+                    }}
+                  >
+                    <span>{triageResult.category === 'EMERGENCY' ? '⚠️' : triageResult.category === 'HIGHER_LEVEL' ? '🟠' : triageResult.category === 'PHC' ? '🟡' : '🟢'}</span>
+                    <span>{triageResult.title[currentLang]}</span>
+                  </span>
+
+                  <span style={{ fontSize: '0.8rem', color: '#64748b', fontWeight: 700 }}>
+                    Digital Care Level Guidance
+                  </span>
+                </div>
+
+                <h4 style={{ margin: '0 0 0.5rem 0', fontSize: '1.25rem', fontWeight: 800, color: '#0f172a', lineHeight: 1.35 }}>
+                  {triageResult.summary[currentLang]}
+                </h4>
+
+                <div style={{ fontSize: '0.92rem', color: '#334155', lineHeight: 1.5, marginTop: '0.5rem' }}>
+                  <strong>Next Action: </strong>
+                  {triageResult.actionGuidance[currentLang]}
+                </div>
+
+                <div style={{ marginTop: '0.85rem', paddingTop: '0.75rem', borderTop: '1px solid rgba(0,0,0,0.08)', fontSize: '0.85rem', color: '#0f172a' }}>
+                  <strong>Appropriate Care Tier:</strong> {triageResult.recommendedCareLevel[currentLang]}
+                </div>
+              </div>
+
+              {/* SECTION B: RECOMMENDED PUBLIC HEALTH FACILITY */}
+              <div>
+                <div style={{ fontSize: '0.84rem', fontWeight: 800, textTransform: 'uppercase', color: '#475569', letterSpacing: '0.05em', marginBottom: '0.6rem' }}>
+                  {currentLang === 'mr' ? 'शिफारस केलेले शासकीय रुग्णालय / केंद्र:' : 'Recommended Public Healthcare Facility:'}
+                </div>
+
+                <div
+                  style={{
+                    background: '#ffffff',
+                    border: '2px solid #0d9488',
+                    borderRadius: '14px',
+                    padding: '1.35rem',
+                    boxShadow: '0 4px 14px rgba(13, 148, 136, 0.1)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '1rem'
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.5rem' }}>
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                        <h5 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 800, color: '#0f172a' }}>
+                          {recommendedFacility.name}
+                        </h5>
+                        <span style={{ background: '#ccfbf1', color: '#0f766e', fontSize: '0.72rem', fontWeight: 800, padding: '0.2rem 0.55rem', borderRadius: '6px' }}>
+                          {recommendedFacility.type}
+                        </span>
+                      </div>
+
+                      <div style={{ fontSize: '0.85rem', color: '#475569', marginTop: '0.35rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                        <span>📍 {recommendedFacility.address || 'Khandala Taluka, Satara'}</span>
+                      </div>
+                    </div>
+
+                    <div style={{ textAlign: 'right' }}>
+                      <span style={{ fontSize: '0.82rem', background: '#f1f5f9', color: '#1e293b', padding: '0.25rem 0.65rem', borderRadius: '6px', fontWeight: 700 }}>
+                        {matchedFacilityInfo.distanceText}
+                      </span>
+                      <div style={{ fontSize: '0.74rem', color: '#64748b', marginTop: '0.25rem' }}>
+                        {matchedFacilityInfo.travelTimeText}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* WHY THIS FACILITY IS APPROPRIATE */}
+                  <div
+                    style={{
+                      background: '#f8fafc',
+                      borderRadius: '8px',
+                      padding: '0.75rem 0.9rem',
+                      border: '1px solid #e2e8f0',
+                      fontSize: '0.84rem',
+                      color: '#334155',
+                      lineHeight: 1.45
+                    }}
+                  >
+                    <strong>Why this facility: </strong>
+                    {matchedFacilityInfo.reason[currentLang]}
+                  </div>
+
+                  {/* DOCTORS AVAILABLE TODAY */}
+                  <div
+                    style={{
+                      background: '#f0fdf4',
+                      borderRadius: '10px',
+                      padding: '0.85rem 1rem',
+                      border: '1px solid #bbf7d0',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      flexWrap: 'wrap',
+                      gap: '0.5rem'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                      <Stethoscope size={20} color="#16a34a" />
+                      <div>
+                        <div style={{ fontSize: '0.76rem', textTransform: 'uppercase', fontWeight: 800, color: '#15803d', letterSpacing: '0.04em' }}>
+                          Doctor Available Today
+                        </div>
+                        <div style={{ fontSize: '0.95rem', fontWeight: 800, color: '#0f172a' }}>
+                          {primaryDoctor.full_name}
+                        </div>
+                        <div style={{ fontSize: '0.78rem', color: '#475569' }}>
+                          {primaryDoctor.specialty} {primaryDoctor.room_number ? `• ${primaryDoctor.room_number}` : ''}
+                        </div>
+                      </div>
+                    </div>
+
+                    <span style={{ background: '#dcfce7', color: '#166534', fontSize: '0.75rem', fontWeight: 800, padding: '0.25rem 0.6rem', borderRadius: '9999px' }}>
+                      ✓ On Duty Now
+                    </span>
+                  </div>
+
+                  {/* ACTION BUTTONS */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.65rem', marginTop: '0.25rem' }}>
+                    {/* GET DIRECTIONS (Uses in-app Map) */}
+                    <button
+                      type="button"
+                      onClick={handleDirectionsClick}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '0.45rem',
+                        background: '#0d9488',
+                        color: '#ffffff',
+                        border: 'none',
+                        padding: '0.75rem 1rem',
+                        borderRadius: '10px',
+                        fontSize: '0.9rem',
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                        boxShadow: '0 2px 8px rgba(13, 148, 136, 0.35)'
+                      }}
+                    >
+                      <Navigation size={17} />
+                      <span>Get Directions</span>
+                    </button>
+
+                    {/* CALL FACILITY */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const phone = recommendedFacility.phone || '02169-244120';
+                        window.location.href = `tel:${phone}`;
+                        showToast(`Calling ${recommendedFacility.name} at ${phone}`, 'info');
+                      }}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '0.45rem',
+                        background: '#ffffff',
+                        color: '#0f766e',
+                        border: '1.5px solid #0d9488',
+                        padding: '0.75rem 1rem',
+                        borderRadius: '10px',
+                        fontSize: '0.9rem',
+                        fontWeight: 800,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <PhoneCall size={17} />
+                      <span>Call Facility</span>
+                    </button>
+
+                    {/* VIEW FACILITY DETAILS */}
+                    <button
+                      type="button"
+                      onClick={handleDetailsClick}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '0.45rem',
+                        background: '#f8fafc',
+                        color: '#334155',
+                        border: '1.5px solid #cbd5e1',
+                        padding: '0.75rem 1rem',
+                        borderRadius: '10px',
+                        fontSize: '0.9rem',
+                        fontWeight: 700,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <Building2 size={17} />
+                      <span>View Details</span>
+                    </button>
+
+                    {/* BOOK OPD / GET TOKEN */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onClose();
+                        if (onOpenBooking) {
+                          onOpenBooking(recommendedFacility.id);
+                        } else if (onOpenToken) {
+                          onOpenToken();
+                        } else {
+                          setCurrentView('queue');
+                        }
+                      }}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '0.45rem',
+                        background: '#0284c7',
+                        color: '#ffffff',
+                        border: 'none',
+                        padding: '0.75rem 1rem',
+                        borderRadius: '10px',
+                        fontSize: '0.9rem',
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                        boxShadow: '0 2px 8px rgba(2, 132, 199, 0.35)'
+                      }}
+                    >
+                      <Calendar size={17} />
+                      <span>Book OPD / Token</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* REPORTED SYMPTOMS SUMMARY TAGS */}
+              <div>
+                <div style={{ fontSize: '0.8rem', fontWeight: 800, textTransform: 'uppercase', color: '#64748b', letterSpacing: '0.04em', marginBottom: '0.4rem' }}>
+                  Reported Questionnaire Answers:
+                </div>
+                <div
+                  style={{
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    gap: '0.45rem',
+                    background: '#f8fafc',
+                    padding: '0.75rem 1rem',
+                    borderRadius: '10px',
+                    border: '1px solid #e2e8f0'
+                  }}
+                >
+                  {TRIAGE_QUESTIONS.map((q) => {
+                    const reported = answers[q.id];
+                    return (
+                      <span
+                        key={q.id}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.3rem',
+                          fontSize: '0.76rem',
+                          fontWeight: 700,
+                          padding: '0.2rem 0.55rem',
+                          borderRadius: '6px',
+                          background: reported ? (q.isEmergencyRedFlag ? '#fee2e2' : '#fef3c7') : '#f1f5f9',
+                          color: reported ? (q.isEmergencyRedFlag ? '#991b1b' : '#b45309') : '#64748b',
+                          border: reported ? (q.isEmergencyRedFlag ? '1px solid #fca5a5' : '1px solid #fde68a') : '1px solid #e2e8f0'
+                        }}
+                      >
+                        {reported ? <CheckCircle2 size={13} color={q.isEmergencyRedFlag ? '#dc2626' : '#d97706'} /> : <XCircle size={13} />}
+                        {q.name}: {reported ? 'YES' : 'NO'}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* MODAL FOOTER */}
+        <div
+          style={{
+            background: '#f8fafc',
+            borderTop: '1px solid #e2e8f0',
+            padding: '0.6rem 1.25rem',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            fontSize: '0.78rem',
+            color: '#64748b'
+          }}
+        >
+          <span>
+            Patient: <strong>{patientProfile?.full_name || 'Rahul Kumar'}</strong> (ID: {patientProfile?.id || 'P-10452'})
+          </span>
+
+          <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center' }}>
+            {isCompleted && (
+              <button
+                type="button"
+                onClick={handleRetake}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.3rem',
+                  background: 'transparent',
+                  border: '1px solid #cbd5e1',
+                  color: '#475569',
+                  padding: '0.4rem 0.75rem',
+                  borderRadius: '6px',
+                  fontWeight: 700,
+                  fontSize: '0.78rem',
+                  cursor: 'pointer'
+                }}
+              >
+                <RotateCcw size={13} />
+                <span>Retake Assessment</span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={onClose}
+              style={{
+                background: '#0f172a',
+                color: '#ffffff',
+                border: 'none',
+                padding: '0.4rem 1rem',
+                borderRadius: '7px',
+                fontWeight: 800,
+                fontSize: '0.8rem',
+                cursor: 'pointer'
+              }}
+            >
+              {isCompleted ? 'Done / Return to Dashboard' : 'Close'}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* QUICK INLINE FACILITY DETAIL MODAL */}
+      {isDetailModalOpen && selectedFacilityDetail && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 110,
+            background: 'rgba(0, 0, 0, 0.65)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '1rem'
+          }}
+        >
+          <div
+            style={{
+              width: '100%',
+              maxWidth: '560px',
+              background: '#ffffff',
+              borderRadius: '14px',
+              padding: '1.5rem',
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.3)',
+              maxHeight: '85vh',
+              overflowY: 'auto'
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
+              <div>
+                <h4 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 800, color: '#0f172a' }}>
+                  {selectedFacilityDetail.facility?.name}
+                </h4>
+                <div style={{ fontSize: '0.85rem', color: '#64748b', marginTop: '0.2rem' }}>
+                  {selectedFacilityDetail.facility?.address}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsDetailModalOpen(false)}
+                style={{ background: 'transparent', border: 'none', cursor: 'pointer' }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', fontSize: '0.88rem', color: '#334155' }}>
+              <div>
+                <strong>Phone: </strong> {selectedFacilityDetail.facility?.phone || '02169-244120'}
+              </div>
+              <div>
+                <strong>Emergency 24x7: </strong> {selectedFacilityDetail.facility?.emergency_24x7 ? 'Available (Yes)' : 'No'}
+              </div>
+              <div>
+                <strong>Doctors Available Today:</strong>
+                <ul style={{ margin: '0.4rem 0 0 1.2rem', padding: 0 }}>
+                  {selectedFacilityDetail.doctors?.map((doc: any) => (
+                    <li key={doc.id} style={{ marginBottom: '0.25rem' }}>
+                      <strong>{doc.full_name}</strong> — {doc.specialty} ({doc.qualification})
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div>
+                <strong>Services:</strong>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', marginTop: '0.35rem' }}>
+                  {selectedFacilityDetail.services?.map((svc: any) => (
+                    <span key={svc.id} style={{ background: '#f1f5f9', padding: '0.2rem 0.5rem', borderRadius: '4px', fontSize: '0.78rem' }}>
+                      {svc.service_name}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div style={{ marginTop: '1.25rem', display: 'flex', justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                onClick={() => setIsDetailModalOpen(false)}
+                style={{
+                  background: '#0f172a',
+                  color: '#ffffff',
+                  border: 'none',
+                  padding: '0.5rem 1.25rem',
+                  borderRadius: '6px',
+                  fontWeight: 700,
+                  cursor: 'pointer'
+                }}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* GET DIRECTIONS MAP OVERLAY (sits above the assessment result; closing
+          it never navigates away, so the result underneath is unaffected) */}
+      {isMapModalOpen && mapFacilityCoords && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 120,
+            background: 'rgba(0, 0, 0, 0.65)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '1rem'
+          }}
+        >
+          <div
+            style={{
+              width: '100%',
+              maxWidth: '600px',
+              background: '#ffffff',
+              borderRadius: '14px',
+              overflow: 'hidden',
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.3)',
+              maxHeight: '88vh',
+              display: 'flex',
+              flexDirection: 'column'
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                gap: '0.75rem',
+                padding: '1rem 1.25rem',
+                background: 'linear-gradient(135deg, #093430 0%, #0d9488 100%)',
+                color: '#ffffff'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0 }}>
+                <Navigation size={19} color="#5eead4" style={{ flexShrink: 0 }} />
+                <div style={{ minWidth: 0 }}>
+                  <h4 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 800, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {recommendedFacility.name}
+                  </h4>
+                  <div style={{ fontSize: '0.76rem', color: '#ccfbf1' }}>Get Directions</div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsMapModalOpen(false)}
+                aria-label="Close map"
+                title="Close"
+                style={{
+                  flexShrink: 0,
+                  width: '40px',
+                  height: '40px',
+                  borderRadius: '10px',
+                  border: 'none',
+                  background: 'rgba(255,255,255,0.15)',
+                  color: '#ffffff',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+              >
+                <X size={22} />
+              </button>
+            </div>
+
+            <div style={{ padding: '1.25rem', overflowY: 'auto', flex: 1 }}>
+              <FacilityNavigationMap
+                facility={{ lat: mapFacilityCoords.lat, lng: mapFacilityCoords.lng, name: recommendedFacility.name }}
+                patient={mapPatientCoords}
+                routeGeometry={mapRoute && !mapRouteIsEstimate ? mapRoute.geometry : null}
+                onStop={() => setIsMapModalOpen(false)}
+              />
+
+              <div style={{ marginTop: '1rem', fontSize: '0.85rem', color: '#334155' }}>
+                {mapLocating && <div style={{ color: '#64748b' }}>Locating you…</div>}
+                {mapGeoError && <div style={{ color: '#b45309' }}>{mapGeoError}</div>}
+                {mapRoute && (
+                  <div style={{ display: 'flex', gap: '1.25rem', flexWrap: 'wrap', fontWeight: 700, color: '#0f172a' }}>
+                    <span>
+                      Distance: {formatDistance(mapRoute.distanceMeters)}
+                      {mapRouteIsEstimate ? ' (estimate)' : ''}
+                    </span>
+                    <span>
+                      Est. Travel Time: {formatDuration(mapRoute.durationSeconds, !mapRouteIsEstimate)}
+                    </span>
+                  </div>
+                )}
+                {mapRouting && !mapRoute && <div style={{ color: '#64748b' }}>Calculating route…</div>}
+                <div style={{ marginTop: '0.5rem', color: '#64748b' }}>
+                  {recommendedFacility.address}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
