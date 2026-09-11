@@ -40,6 +40,10 @@ export const Navbar: React.FC<{ onOpenEmergency?: () => void }> = () => {
       const patientExcluded = ['home', 'citizen', 'queue', 'medicines', 'ehr', 'referrals'];
       if (patientExcluded.includes(item.id)) return false;
     }
+    // Staff roles (ASHA/ANM, Doctor, Hospital Management, Admin) have their
+    // own dashboards and must not see this shared top navigation strip at all.
+    const staffRoles = ['asha_worker', 'doctor', 'hospital', 'admin'];
+    if (staffRoles.includes(currentUser?.role)) return false;
     if (!item.roleRequired) return true;
     return item.roleRequired.includes(currentUser?.role);
   });
@@ -51,7 +55,14 @@ export const Navbar: React.FC<{ onOpenEmergency?: () => void }> = () => {
       <div style={{ maxWidth: '1400px', margin: '0 auto', padding: '0.65rem 1.5rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem' }}>
         {/* Brand */}
         <div
-          onClick={() => setCurrentView(currentUser?.role === 'patient' ? 'citizen' : 'home')}
+          onClick={() => {
+            // Patient: unchanged, returns to their dashboard. Staff roles
+            // (ASHA/ANM, Doctor, Hospital Management, Admin): intentionally
+            // a no-op - there is no shared nav strip for the logo to return to.
+            if (currentUser?.role === 'patient') {
+              setCurrentView('citizen');
+            }
+          }}
           style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', cursor: 'pointer' }}
         >
           <div style={{
